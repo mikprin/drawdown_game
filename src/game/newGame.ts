@@ -1,8 +1,9 @@
 import { ECON, EXPLORATION, MARKET } from './balance';
+import { msg } from './msg';
 import { rand, randLogNormal, randNormal, randRange, type RngHolder } from './rng';
 import type { Cell, Exploration, Field, Flows, GameState, Lead, Well } from './types';
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
 export const FIELD_NAMES = [
   'Ash Creek', 'Red Mesa', 'Coyote Draw', 'Iron Flats', 'Sable Ridge', 'Dry Fork',
@@ -181,7 +182,7 @@ export function newGame(seed = (Math.random() * 2 ** 32) >>> 0): GameState {
     },
     exploration,
     history: { day: [], price: [], oil: [], water: [], cash: [], profit: [] },
-    log: [{ day: 0, text: 'You inherit one tired pumpjack on the Old Barrow field. Make it count.', kind: 'info' }],
+    log: [{ day: 0, msg: msg('log.start'), kind: 'info' }],
     stats: { oilProduced: 0, oilSold: 0, revenue: 0, wellsDrilled: 0, wildcats: 0, discoveries: 0 },
     objectivesDone: [],
     flows: emptyFlows(),

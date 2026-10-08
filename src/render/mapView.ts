@@ -5,6 +5,7 @@ import {
 } from '../game/explore';
 import { fmtNum } from '../game/format';
 import type { GameState } from '../game/types';
+import { getLang, t as tr } from '../i18n';
 import { fbm, vnoise } from './noise';
 import { bake, baker, spriteOf } from './paint';
 
@@ -149,7 +150,7 @@ export class MapView {
       this.root.hitArea = new Rectangle(0, 0, ex.w * CELL, ex.h * CELL);
       this.fogTex = bakeFog();
     }
-    const key = ex.blocks.join('') + '|' + ex.cells.map((c) => c.drilled[0] + c.fieldId).join('') +
+    const key = getLang() + ex.blocks.join('') + '|' + ex.cells.map((c) => c.drilled[0] + c.fieldId).join('') +
       '|' + s.fields.map((f) => `${f.id}${f.developed ? 1 : 0}${f.devJob ? 1 : 0}`).join(',');
     if (key === this.staticKey) return;
     this.staticKey = key;
@@ -209,7 +210,7 @@ export class MapView {
     const hx = ex.hubX * CELL + CELL / 2, hy = ex.hubY * CELL + CELL / 2;
     m.rect(hx - 12, hy - 12, 24, 24).fill({ color: 0x2a2620 }).stroke({ width: 2, color: 0xe8a23a });
     m.rect(hx - 6, hy - 6, 12, 12).fill({ color: 0xe8a23a });
-    label('HUB', hx, hy + 13, 0xe8a23a);
+    label(tr('map.hub'), hx, hy + 13, 0xe8a23a);
 
     for (let y = 0; y < ex.h; y++) {
       for (let x = 0; x < ex.w; x++) {

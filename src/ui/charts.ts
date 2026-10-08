@@ -1,3 +1,5 @@
+import { t } from '../i18n';
+
 function fit(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const w = canvas.clientWidth || Number(canvas.getAttribute('width')) || 100;
@@ -57,7 +59,7 @@ export function productionChart(canvas: HTMLCanvasElement, oil: number[], water:
     ctx.fillText(v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0), 2, y + 3);
   }
   if (n < 2) {
-    ctx.fillText('collecting data…', pad.l + 8, hgt / 2);
+    ctx.fillText(t('chart.collecting'), pad.l + 8, hgt / 2);
     return;
   }
   const X = (i: number) => pad.l + (i / (n - 1)) * (w - pad.l - pad.r);
@@ -83,5 +85,5 @@ export function productionChart(canvas: HTMLCanvasElement, oil: number[], water:
   ctx.lineWidth = 1.2;
   ctx.stroke();
   ctx.fillStyle = '#6c6152';
-  ctx.fillText(`${n}d`, pad.l, hgt - 1);
+  ctx.fillText(t('chart.days', { n }), pad.l, hgt - 1);
 }

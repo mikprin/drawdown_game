@@ -6,11 +6,11 @@ import {
   marketDepth, repairCost, reserveEstimate, reservoirLiquid, serviceCost, waterCut,
 } from './reservoir';
 import { rand, randNormal, randRange } from './rng';
-import type { Bottleneck, FacilityId, Flows, GameState, LogKind, Well, WellFlow } from './types';
-import { fmtBbl, fmtMoney } from './format';
+import { msg, type Msg } from './msg';
+import type { Bottleneck, CostId, FacilityId, Flows, GameState, LogKind, Well, WellFlow } from './types';
 
-export function addLog(s: GameState, text: string, kind: LogKind = 'info'): void {
-  s.log.unshift({ day: s.day, text, kind });
+export function addLog(s: GameState, m: Msg, kind: LogKind = 'info'): void {
+  s.log.unshift({ day: s.day, msg: m, kind });
   if (s.log.length > 80) s.log.length = 80;
 }
 
@@ -46,8 +46,8 @@ function updateMarket(s: GameState, dt: number): void {
   if (rand(s) < MARKET.regimeChancePerDay * dt) {
     const old = m.target;
     m.target = randRange(s, MARKET.minTarget, MARKET.maxTarget);
-    if (m.target > old + 8) addLog(s, `Supply squeeze: traders see crude heading toward $${Math.round(m.target)}.`, 'good');
-    else if (m.target < old - 8) addLog(s, `Glut fears: crude outlook slides toward $${Math.round(m.target)}.`, 'bad');
+    if (m.target > old + 8) addLog(s, msg('log.squeeze', { price: Math.round(m.target) }), 'good');
+    else if (m.target < old - 8) addLog(s, msg('log.glut', { price: Math.round(m.target) }), 'bad');
   }
   m.base += (m.target - m.base) * (1 - Math.exp(-dt / MARKET.baseRelaxDays));
   m.noise += (-m.noise * dt) / MARKET.noiseRelaxDays + MARKET.noiseVol * Math.sqrt(dt) * randNormal(s);
@@ -66,30 +66,30 @@ function advanceJobs(s: GameState, dt: number): void {
     w.job = null;
     switch (job.kind) {
       case 'drill':
-        addLog(s, `${w.name} is drilled and on production.`, 'good');
+        addLog(s, msg('log.drilled', { well: w.name }), 'good');
         break;
       case 'lift':
         w.lift = job.lift!;
         w.condition = 1;
-        addLog(s, `${w.name}: ${LIFTS[w.lift].name} installed.`, 'good');
+        addLog(s, msg('log.liftInstalled', { well: w.name, lift: msg(`lift.${w.lift}.name`) }), 'good');
         break;
       case 'frac': {
         const f = fieldById(s, w.fieldId);
         w.stim += ECON.fracBoost * Math.pow(ECON.fracBoostDecayPerFrac, w.fracCount);
         w.fracCount++;
         f.rfFrac = Math.min(0.03, f.rfFrac + ECON.fracRfBonus);
-        addLog(s, `${w.name}: frac job complete — productivity up.`, 'good');
+        addLog(s, msg('log.fracDone', { well: w.name }), 'good');
         break;
       }
       case 'convert':
         w.status = 'injector';
         w.condition = 1;
-        addLog(s, `${w.name} converted to water injector.`, 'good');
+        addLog(s, msg('log.converted', { well: w.name }), 'good');
         break;
       case 'repair':
         w.status = 'active';
         w.condition = 1;
-        addLog(s, `${w.name} repaired and back online.`, 'good');
+        addLog(s, msg('log.repaired', { well: w.name }), 'good');
         break;
     }
   }
@@ -102,7 +102,7 @@ function advanceJobs(s: GameState, dt: number): void {
     f.developed = true;
     const well = makeWell(s, s.nextId++, f, 0, `${f.name.split(' ')[0]}-1`);
     s.wells.push(well);
-    addLog(s, `${f.name} is tied back to the hub. Discovery well on stream.`, 'good');
+    addLog(s, msg('log.tiedBack', { field: f.name }), 'good');
   }
 
   const ex = s.exploration;
@@ -111,7 +111,7 @@ function advanceJobs(s: GameState, dt: number): void {
     if (sv.daysLeft > 0) continue;
     ex.blocks[sv.block] = Math.max(ex.blocks[sv.block], sv.kind);
     const leads = blockCells(s, sv.block).filter((c) => c.lead && (sv.kind === 3 || c.lead.detect2d)).length;
-    addLog(s, `${sv.kind}D seismic processed: ${leads} lead${leads === 1 ? '' : 's'} mapped.`, leads ? 'good' : 'info');
+    addLog(s, msg('log.seismicDone', { kind: sv.kind, leads }), leads ? 'good' : 'info');
   }
   ex.surveys = ex.surveys.filter((sv) => sv.daysLeft > 0);
 
@@ -148,13 +148,13 @@ function resolveWildcat(s: GameState): void {
     s.stats.discoveries++;
     const est = reserveEstimate(field);
     if (est.p50 > 1_500_000) {
-      addLog(s, `GUSHER! ${name} discovered — P50 ${fmtBbl(est.p50)} recoverable!`, 'jackpot');
+      addLog(s, msg('log.gusher', { field: name, p50: est.p50 }), 'jackpot');
     } else {
-      addLog(s, `Discovery! ${name}: P50 ${fmtBbl(est.p50)} recoverable.`, 'good');
+      addLog(s, msg('log.discovery', { field: name, p50: est.p50 }), 'good');
     }
   } else {
     cell.drilled = 'dry';
-    addLog(s, `Dry hole at ${wc.x},${wc.y}. The rig moves on.`, 'bad');
+    addLog(s, msg('log.dry', { x: wc.x, y: wc.y }), 'bad');
   }
 }
 
@@ -255,19 +255,19 @@ export function computeFlows(s: GameState, dt: number): Flows {
   let facOpex = ECON.hubBaseOpexDay;
   for (const id of Object.keys(FACILITIES) as FacilityId[]) facOpex += facilityOpex(id, s.facilities[id]);
 
-  const costs: Record<string, number> = {
-    'Well opex': wellOpex,
-    'Lift power': powerCost,
-    Facilities: facOpex,
-    'Water handling':
+  const costs: Partial<Record<CostId, number>> = {
+    wellOpex,
+    liftPower: powerCost,
+    facilities: facOpex,
+    water:
       injFromProduced * ECON.injectionPerBbl +
       sourceWater * (ECON.injectionPerBbl + ECON.sourceWaterPerBbl) +
       swd * ECON.swdPerBbl +
       trucked * ECON.waterTruckPerBbl,
-    Transport: soldPipe * ECON.pipePerBbl + (sold - soldPipe) * ECON.truckPerBbl,
-    Flaring: gasFlared * ECON.flarePerMcf,
+    transport: soldPipe * ECON.pipePerBbl + (sold - soldPipe) * ECON.truckPerBbl,
+    flaring: gasFlared * ECON.flarePerMcf,
   };
-  if (s.techs.maintCrew) costs['Crew wages'] = ECON.maintWageDay;
+  if (s.techs.maintCrew) costs.wages = ECON.maintWageDay;
 
   out.sepCap = sepCap; out.waterCap = waterCap; out.storageCap = storageCap;
   out.exportCap = exportCap; out.injCap = injCap; out.injected = injCap;
@@ -330,7 +330,7 @@ function updateWear(s: GameState, fl: Flows, dt: number): void {
     w.condition = Math.max(0, w.condition - LIFTS[w.lift].wearPerDay * (0.3 + 0.7 * util) * dt);
     if (w.condition < ECON.failThreshold && rand(s) < (ECON.failThreshold - w.condition) * ECON.failRate * dt) {
       w.status = 'failed';
-      addLog(s, `${LIFTS[w.lift].name} failure on ${w.name} — well is down. Repair ${fmtMoney(repairCost(w))}.`, 'bad');
+      addLog(s, msg('log.failure', { lift: msg(`lift.${w.lift}.name`), well: w.name, cost: repairCost(w) }), 'bad');
     }
   }
 
@@ -342,7 +342,7 @@ function updateWear(s: GameState, fl: Flows, dt: number): void {
       if (s.cash >= c) {
         s.cash -= c;
         w.job = { kind: 'repair', daysLeft: ECON.repairDays, total: ECON.repairDays };
-        addLog(s, `Crew dispatched to repair ${w.name} (${fmtMoney(c)}).`);
+        addLog(s, msg('log.crewRepair', { well: w.name, cost: c }));
       }
     } else if ((w.status === 'active' || w.status === 'shutin') && w.condition < ECON.maintThreshold) {
       const c = serviceCost(w);

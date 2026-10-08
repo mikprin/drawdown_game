@@ -168,8 +168,8 @@ export function wellNetPerDay(s: GameState, w: Well): number {
   if (!wf || w.status !== 'active' || w.job) return 0;
   const fl = s.flows;
   const lift = LIFTS[w.lift];
-  const waterCost = fl.water > 0 ? (fl.costs['Water handling'] ?? 0) / fl.water : ECON.waterTruckPerBbl;
-  const transport = fl.sold > 0 ? (fl.costs['Transport'] ?? 0) / fl.sold : ECON.truckPerBbl;
+  const waterCost = fl.water > 0 ? (fl.costs.water ?? 0) / fl.water : ECON.waterTruckPerBbl;
+  const transport = fl.sold > 0 ? (fl.costs.transport ?? 0) / fl.sold : ECON.truckPerBbl;
   const price = fl.salePrice || s.market.price;
   const soldShare = fl.gas > 0 ? Math.min(1, cap(s, 'compressor') / fl.gas) : 0;
   const gasValue = soldShare * ECON.gasPricePerMcf - (1 - soldShare) * ECON.flarePerMcf;

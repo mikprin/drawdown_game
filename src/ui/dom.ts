@@ -1,5 +1,7 @@
 import type { Result } from '../game/actions';
 import { fmtMoney } from '../game/format';
+import { tm } from '../i18n';
+import { help, term, type HelpSource, type HelpView } from './help';
 
 type Child = Node | string | number | null | undefined | false;
 type Attrs = Record<string, unknown> | null;
@@ -47,7 +49,7 @@ export function toggleClass(el: Element, cls: string, on: boolean): void {
 
 /**
  * Button bound to a game action. `check` is the dry-run; the button shows the
- * cost, and when disabled the reason appears as the tooltip.
+ * cost, and the hover card explains it and says why it is disabled.
  */
 export class ActionButton {
   readonly el: HTMLButtonElement;
@@ -58,7 +60,7 @@ export class ActionButton {
     label: string,
     private check: () => Result,
     run: () => void,
-    private opts: { cls?: string; showCost?: boolean; hint?: string; labelFn?: () => string } = {},
+    private opts: { cls?: string; showCost?: boolean; help?: HelpSource; labelFn?: () => string } = {},
   ) {
     this.labelEl = h('span', null, label);
     this.costEl = h('span', { class: 'cost' });
@@ -66,6 +68,15 @@ export class ActionButton {
     this.el.addEventListener('click', () => {
       if (this.check().ok) run();
     });
+    help(this.el, () => this.helpView(), false);
+  }
+
+  private helpView(): HelpView | null {
+    const src = this.opts.help;
+    const base = typeof src === 'function' ? src() : src ? term(src) : null;
+    const r = this.check();
+    if (r.ok) return base;
+    return { ...(base ?? { title: this.labelEl.textContent ?? '' }), note: tm(r.reason), noteCls: 'bad' };
   }
 
   setLabel(label: string): void {
@@ -74,16 +85,10 @@ export class ActionButton {
 
   update(): void {
     const r = this.check();
-    this.el.disabled = !r.ok;
+    // aria-disabled instead of `disabled`: disabled buttons get no pointer events, so the hover card could not explain them.
+    const off = String(!r.ok);
+    if (this.el.getAttribute('aria-disabled') !== off) this.el.setAttribute('aria-disabled', off);
     if (this.opts.labelFn) setText(this.labelEl, this.opts.labelFn());
-    const hint = this.opts.hint ?? '';
-    if (r.ok) {
-      setText(this.costEl, r.cost > 0 ? fmtMoney(r.cost) : '');
-      this.el.title = hint;
-    } else {
-      const m = /^Need (.*)$/.exec(r.reason);
-      setText(this.costEl, m ? m[1] : '');
-      this.el.title = hint ? `${r.reason} — ${hint}` : r.reason;
-    }
+    setText(this.costEl, r.cost ? fmtMoney(r.cost) : '');
   }
 }

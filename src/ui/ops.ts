@@ -3,24 +3,32 @@ import {
   repairWell, serviceWell, setLift, toggleShutIn,
 } from '../game/actions';
 import { ECON, LIFTS } from '../game/balance';
-import { fmtBbl, fmtDays, fmtMoney, fmtPct, fmtRate } from '../game/format';
+import { fmtBbl, fmtDays, fmtGas, fmtMoney, fmtNum, fmtPct, fmtRate, fmtRateShort } from '../game/format';
+import { msg } from '../game/msg';
 import {
   depletion, fieldById, fieldWells, pressure, reserveEstimate, waterCut, wellById, wellNetPerDay,
 } from '../game/reservoir';
-import type { LiftType, Well } from '../game/types';
+import type { LiftType, Well, WellStatus } from '../game/types';
+import { t, type HelpId, type MsgKey } from '../i18n';
 import { ActionButton, bar, h, setBar, setText, toggleClass } from './dom';
 import type { Ctx } from './ctx';
+import { help, term, type HelpSource } from './help';
 import { confirmModal } from './modal';
 
 const LIFT_ORDER: LiftType[] = ['flowing', 'rodpump', 'gaslift', 'esp'];
-const JOB_LABEL: Record<string, string> = { drill: 'Drilling', lift: 'Installing lift', frac: 'Frac job', convert: 'Converting', repair: 'Repairing' };
+const STATUS_HELP: Partial<Record<WellStatus, HelpId>> = { failed: 'failed', shutin: 'shutin', injector: 'injector' };
 
 function statusOf(w: Well): { cls: string; text: string; badge: string } {
-  if (w.job) return { cls: 'job', text: JOB_LABEL[w.job.kind], badge: 'amber' };
-  if (w.status === 'failed') return { cls: 'failed', text: 'Failed', badge: 'bad' };
-  if (w.status === 'shutin') return { cls: 'shutin', text: 'Shut in', badge: '' };
-  if (w.status === 'injector') return { cls: 'injector', text: 'Injector', badge: 'water' };
-  return { cls: 'active', text: 'Producing', badge: 'good' };
+  if (w.job) return { cls: 'job', text: t(`job.${w.job.kind}`), badge: 'amber' };
+  if (w.status === 'failed') return { cls: 'failed', text: t('status.failed'), badge: 'bad' };
+  if (w.status === 'shutin') return { cls: 'shutin', text: t('status.shutin'), badge: '' };
+  if (w.status === 'injector') return { cls: 'injector', text: t('status.injector'), badge: 'water' };
+  return { cls: 'active', text: t('status.active'), badge: 'good' };
+}
+
+/** Card for a lift type: what it is and how much it lifts. */
+function liftHelp(lt: LiftType) {
+  return () => ({ title: t(`lift.${lt}.name`), body: `${t(`lift.${lt}.desc`)} ${t('lift.max', { cap: LIFTS[lt].capacity })}` });
 }
 
 interface Row {
@@ -52,34 +60,35 @@ export class OpsPanel {
   private detailUpdate: (() => void) | null = null;
 
   constructor(private ctx: Ctx) {
-    const kvRow = (k: string, key: string) => {
+    const kvRow = (k: MsgKey, key: string, id?: HelpId) => {
       this.kv[key] = h('span', { class: 'v' });
-      return [h('span', { class: 'k' }, k), this.kv[key]];
+      const label = h('span', { class: 'k' }, t(k));
+      return [id ? help(label, id) : label, this.kv[key]];
     };
-    const drill = new ActionButton('Drill well', () => drillWell(ctx.s, ctx.ui.field, true), () => ctx.act((s) => drillWell(s, ctx.ui.field)), { cls: 'primary' });
-    const pad = new ActionButton('Expand pad', () => expandPad(ctx.s, ctx.ui.field, true), () => ctx.act((s) => expandPad(s, ctx.ui.field)));
+    const drill = new ActionButton(t('ops.drill'), () => drillWell(ctx.s, ctx.ui.field, true), () => ctx.act((s) => drillWell(s, ctx.ui.field)), { cls: 'primary', help: 'drill' });
+    const pad = new ActionButton(t('ops.expand'), () => expandPad(ctx.s, ctx.ui.field, true), () => ctx.act((s) => expandPad(s, ctx.ui.field)), { help: 'pad' });
     this.fieldBtns = [drill, pad];
     this.el.append(
-      h('div', { class: 'section' }, h('div', { class: 'section-title' }, 'Fields'), this.tabs),
+      h('div', { class: 'section' }, h('div', { class: 'section-title' }, t('ops.fields')), this.tabs),
       h('div', { class: 'section' },
         h('div', { class: 'card rivets' },
           h('div', { class: 'title-row' }, this.fieldName, this.fieldSub),
-          h('div', { class: 'reserve', title: 'Estimated ultimate recovery. P90 = conservative, P10 = optimistic. Narrows as the field produces.' },
-            h('div', null, h('div', { class: 'k' }, 'P90'), this.p90),
-            h('div', { class: 'p50' }, h('div', { class: 'k' }, 'P50 EUR'), this.p50),
-            h('div', null, h('div', { class: 'k' }, 'P10'), this.p10)),
+          help(h('div', { class: 'reserve' },
+            h('div', null, h('div', { class: 'k' }, t('ops.p90')), this.p90),
+            h('div', { class: 'p50' }, h('div', { class: 'k' }, t('ops.p50')), this.p50),
+            h('div', null, h('div', { class: 'k' }, t('ops.p10')), this.p10)), 'eur', false),
           h('div', { class: 'kv' },
-            ...kvRow('Produced', 'np'),
-            ...kvRow('Remaining (P50)', 'rem'),
-            ...kvRow('Water cut', 'wc'),
-            ...kvRow('Waterflood support', 'flood'),
-            ...kvRow('Wells / slots', 'slots')),
-          h('div', { class: 'kv' }, h('span', { class: 'k' }, 'Reservoir pressure'), this.kv.pressure = h('span', { class: 'v' })),
+            ...kvRow('ops.produced', 'np'),
+            ...kvRow('ops.remaining', 'rem', 'eur'),
+            ...kvRow('ops.wc', 'wc', 'wc'),
+            ...kvRow('ops.flood', 'flood', 'flood'),
+            ...kvRow('ops.slots', 'slots', 'pad')),
+          h('div', { class: 'kv' }, ...kvRow('ops.pressure', 'pressure', 'pressure')),
           this.pressureBar,
           h('div', { class: 'btn-row' }, drill.el, pad.el),
         ),
       ),
-      h('div', { class: 'section' }, h('div', { class: 'section-title' }, 'Wells', this.wellsAside), this.wells),
+      h('div', { class: 'section' }, h('div', { class: 'section-title' }, t('ops.wells'), this.wellsAside), this.wells),
       h('div', { class: 'section' }, this.detail),
     );
   }
@@ -101,22 +110,22 @@ export class OpsPanel {
     const fw = fieldWells(s, f.id);
     const est = reserveEstimate(f);
     setText(this.fieldName, f.name);
-    setText(this.fieldSub, f.id === 1 ? 'home field' : 'satellite');
-    setText(this.p90, fmtBbl(est.p90).replace(' bbl', ''));
-    setText(this.p50, fmtBbl(est.p50).replace(' bbl', ''));
-    setText(this.p10, fmtBbl(est.p10).replace(' bbl', ''));
+    setText(this.fieldSub, t(f.id === 1 ? 'ops.home' : 'ops.satellite'));
+    setText(this.p90, fmtNum(est.p90));
+    setText(this.p50, fmtNum(est.p50));
+    setText(this.p10, fmtNum(est.p10));
     setText(this.kv.np, fmtBbl(f.np));
     setText(this.kv.rem, fmtBbl(Math.max(0, est.p50 - f.np)));
     let liq = 0, wat = 0;
     for (const w of fw) { liq += s.flows.wells[w.id]?.liquid ?? 0; wat += s.flows.wells[w.id]?.water ?? 0; }
     const sample = fw.find((w) => w.status !== 'injector');
     setText(this.kv.wc, liq > 0 ? fmtPct(wat / liq) : sample ? fmtPct(waterCut(f, sample)) : '—');
-    setText(this.kv.flood, f.flood > 0.01 ? fmtPct(f.flood) : 'none');
+    setText(this.kv.flood, f.flood > 0.01 ? fmtPct(f.flood) : t('ops.none'));
     setText(this.kv.slots, `${fw.length} / ${f.slots}`);
     const p = pressure(f);
-    setText(this.kv.pressure, `${fmtPct(p)} · ${fmtPct(depletion(f))} depleted`);
+    setText(this.kv.pressure, t('ops.depleted', { p, d: depletion(f) }));
     setBar(this.pressureBar, p);
-    this.fieldBtns[0].setLabel(fw.length === 0 ? 'Drill well' : `Drill well · ${fmtDays(ECON.drillDays)}`);
+    this.fieldBtns[0].setLabel(fw.length === 0 ? t('ops.drill') : t('ops.drillDays', { days: ECON.drillDays }));
     for (const b of this.fieldBtns) b.update();
 
     this.updateWells(fw);
@@ -127,42 +136,42 @@ export class OpsPanel {
     const s = this.ctx.s;
     const key = fw.map((w) => `${w.id}:${w.status}:${w.lift}:${w.job?.kind ?? ''}`).join(',') + '|' + this.ctx.ui.well;
     const producing = fw.filter((w) => w.status === 'active' && !w.job).length;
-    setText(this.wellsAside, `${producing} producing`);
+    setText(this.wellsAside, t('ops.producing', { n: producing }));
     if (key !== this.wellsKey) {
       this.wellsKey = key;
       this.rows.clear();
       const rows = fw.map((w) => {
         const st = statusOf(w);
+        const isInj = w.status === 'injector';
         const r: Row = {
           dot: h('span', { class: `status-dot ${st.cls}`, title: st.text }),
           rate: h('span', { class: 'rate' }),
           wc: h('span', { class: 'wc' }),
-          cond: bar('cond'),
+          cond: help(bar('cond'), () => ({ ...term('condition'), note: fmtPct(wellById(this.ctx.s, w.id)?.condition ?? 0) }), false),
           el: h('div'),
         };
         r.el = h('div', { class: `well-row ${w.id === this.ctx.ui.well ? 'sel' : ''}`, onclick: () => this.ctx.selectWell(w.id) },
           r.dot, h('span', { class: 'nm' }, w.name),
-          h('span', { class: 'lift' }, w.status === 'injector' ? 'INJ' : LIFTS[w.lift].short),
-          r.rate, r.wc, r.cond);
+          help(h('span', { class: 'lift' }, isInj ? t('ops.injShort') : t(`lift.${w.lift}.short`)), isInj ? 'injector' : liftHelp(w.lift), false),
+          r.rate, help(r.wc, 'wc', false), r.cond);
         this.rows.set(w.id, r);
         return r.el;
       });
-      this.wells.replaceChildren(...(rows.length ? rows : [h('div', { class: 'empty' }, 'No wells yet.')]));
+      this.wells.replaceChildren(...(rows.length ? rows : [h('div', { class: 'empty' }, t('ops.noWells'))]));
     }
     for (const w of fw) {
       const r = this.rows.get(w.id)!;
       const wf = s.flows.wells[w.id];
       if (w.status === 'injector') {
-        setText(r.rate, wf ? fmtRate(wf.inj).replace(' bbl/d', '') : '0');
-        setText(r.wc, 'inj');
+        setText(r.rate, wf ? fmtRateShort(wf.inj) : '0');
+        setText(r.wc, t('ops.inj'));
       } else {
-        setText(r.rate, wf ? fmtRate(wf.oil).replace(' bbl/d', '') + ' b/d' : '—');
+        setText(r.rate, wf ? fmtRateShort(wf.oil) : '—');
         setText(r.wc, wf ? fmtPct(wf.wc) : '—');
       }
       setBar(r.cond, w.condition);
       toggleClass(r.cond, 'warn', w.condition < 0.4);
       toggleClass(r.cond, 'good', w.condition >= 0.4);
-      r.cond.title = `Condition ${fmtPct(w.condition)}`;
     }
   }
 
@@ -174,7 +183,7 @@ export class OpsPanel {
       if (this.detailKey !== 'none') {
         this.detailKey = 'none';
         this.detailUpdate = null;
-        this.detail.replaceChildren(h('div', { class: 'empty' }, 'Select a well in the list or click one on the site.'));
+        this.detail.replaceChildren(h('div', { class: 'empty' }, t('ops.selectWell')));
       }
       return;
     }
@@ -191,13 +200,14 @@ export class OpsPanel {
     const id = w.id;
     const st = statusOf(w);
     const v: Record<string, HTMLElement> = {};
-    const kv = (label: string, key: string, cls = '') => {
+    const kv = (label: MsgKey, key: string, cls = '', helpId?: HelpId) => {
       v[key] = h('span', { class: `v ${cls}` });
-      return [h('span', { class: 'k' }, label), v[key]];
+      const k = h('span', { class: 'k' }, t(label));
+      return [helpId ? help(k, helpId) : k, v[key]];
     };
     const btns: ActionButton[] = [];
-    const btn = (label: string, check: () => ReturnType<typeof fracWell>, run: () => void, cls = '') => {
-      const b = new ActionButton(label, check, run, { cls });
+    const btn = (label: string, check: () => ReturnType<typeof fracWell>, run: () => void, src: HelpSource, cls = '') => {
+      const b = new ActionButton(label, check, run, { cls, help: src });
       btns.push(b);
       return b.el;
     };
@@ -211,60 +221,62 @@ export class OpsPanel {
 
     const condBar = bar('tall');
     const isInj = w.status === 'injector';
+    const badge = h('span', { class: `badge ${st.badge} right` }, st.text);
+    const statusHelp = w.job ? null : STATUS_HELP[w.status];
     const children: (Node | null)[] = [
-      h('div', { class: 'title-row' }, h('span', { class: 'name' }, w.name), h('span', { class: `badge ${st.badge} right` }, st.text)),
+      h('div', { class: 'title-row' }, h('span', { class: 'name' }, w.name), statusHelp ? help(badge, statusHelp, false) : badge),
       w.job ? progress : null,
       h('div', { class: 'kv' },
         ...(isInj
-          ? [...kv('Injection', 'inj', 'water')]
+          ? [...kv('well.injection', 'inj', 'water', 'injector')]
           : [
-              ...kv('Reservoir can give', 'res'),
-              ...kv('Lift capacity', 'cap'),
-              ...kv('Liquid lifted', 'liq'),
-              ...kv('Oil', 'oil', 'oil'),
-              ...kv('Water', 'wat', 'water'),
-              ...kv('Water cut', 'wc', 'water'),
-              ...kv('Gas', 'gas', 'gas'),
-              ...kv('Net / day', 'net'),
-              ...kv('Frac stages', 'frac'),
+              ...kv('well.reservoir', 'res', '', 'deliverability'),
+              ...kv('well.liftCap', 'cap', '', 'liftCap'),
+              ...kv('well.liquid', 'liq'),
+              ...kv('well.oil', 'oil', 'oil'),
+              ...kv('well.water', 'wat', 'water'),
+              ...kv('well.wc', 'wc', 'water', 'wc'),
+              ...kv('well.gas', 'gas', 'gas', 'gas'),
+              ...kv('well.net', 'net', '', 'wellNet'),
+              ...kv('well.frac', 'frac', '', 'frac'),
             ]),
-        ...kv('Cumulative oil', 'np'),
-        ...kv('Condition', 'cond')),
+        ...kv('well.np', 'np'),
+        ...kv('well.cond', 'cond', '', 'condition')),
       condBar,
     ];
 
     if (!isInj && w.status !== 'failed') {
       const liftGrid = h('div', { class: 'lift-grid' });
       for (const lt of LIFT_ORDER) {
-        const def = LIFTS[lt];
         const installed = w.lift === lt;
-        const b = new ActionButton(def.name, () => (installed ? { ok: false, reason: 'Installed' } : setLift(ctx.s, id, lt, true)),
-          act((s) => setLift(s, id, lt)), { cls: `small ${installed ? 'on' : ''}`, hint: `${def.desc} Max ${def.capacity} bbl/d liquid.` });
+        const b = new ActionButton(t(`lift.${lt}.name`),
+          () => (installed ? { ok: false, reason: msg('reason.installed') } : setLift(ctx.s, id, lt, true)),
+          act((s) => setLift(s, id, lt)), { cls: `small ${installed ? 'on' : ''}`, help: liftHelp(lt) });
         btns.push(b);
         liftGrid.append(b.el);
       }
-      children.push(h('div', { class: 'section-title', style: 'margin-top:10px' }, 'Artificial lift'), liftGrid);
+      children.push(h('div', { class: 'section-title', style: 'margin-top:10px' }, help(h('span', null, t('well.lift')), 'lift')), liftGrid);
     }
 
     const actions = h('div', { class: 'btn-grid' });
     if (w.status === 'failed') {
-      actions.append(btn('Repair', () => repairWell(ctx.s, id, true), act((s) => repairWell(s, id)), 'primary'));
+      actions.append(btn(t('btn.repair'), () => repairWell(ctx.s, id, true), act((s) => repairWell(s, id)), 'repair', 'primary'));
     } else if (isInj) {
-      actions.append(btn('To producer', () => convertToProducer(ctx.s, id, true), act((s) => convertToProducer(s, id))));
+      actions.append(btn(t('btn.toProducer'), () => convertToProducer(ctx.s, id, true), act((s) => convertToProducer(s, id)), 'toProducer'));
     } else {
       actions.append(
-        btn(`Frac · ${ECON.fracDays}d`, () => fracWell(ctx.s, id, true), act((s) => fracWell(s, id)), 'primary'),
-        btn('Service', () => serviceWell(ctx.s, id, true), act((s) => serviceWell(s, id))),
-        btn(w.status === 'shutin' ? 'Reopen' : 'Shut in', () => toggleShutIn(ctx.s, id, true), act((s) => toggleShutIn(s, id))),
-        btn('To injector', () => convertToInjector(ctx.s, id, true), act((s) => convertToInjector(s, id))),
+        btn(t('btn.frac', { days: ECON.fracDays }), () => fracWell(ctx.s, id, true), act((s) => fracWell(s, id)), 'frac', 'primary'),
+        btn(t('btn.service'), () => serviceWell(ctx.s, id, true), act((s) => serviceWell(s, id)), 'service'),
+        btn(t(w.status === 'shutin' ? 'btn.reopen' : 'btn.shutIn'), () => toggleShutIn(ctx.s, id, true), act((s) => toggleShutIn(s, id)), 'shutin'),
+        btn(t('btn.toInjector'), () => convertToInjector(ctx.s, id, true), act((s) => convertToInjector(s, id)), 'toInjector'),
       );
     }
-    const plug = new ActionButton('Plug & abandon', () => plugWell(ctx.s, id, true), () =>
-      confirmModal('Plug & abandon', `Permanently plug ${w.name} and free its slot?`, 'Plug it', () => ctx.act((s) => plugWell(s, id))),
-      { cls: 'danger small' });
+    const plug = new ActionButton(t('btn.plug'), () => plugWell(ctx.s, id, true), () =>
+      confirmModal(t('plug.title'), t('plug.text', { well: w.name }), t('plug.ok'), () => ctx.act((s) => plugWell(s, id))),
+      { cls: 'danger small', help: 'plug' });
     btns.push(plug);
     actions.append(plug.el);
-    children.push(h('div', { class: 'section-title', style: 'margin-top:10px' }, 'Actions'), actions);
+    children.push(h('div', { class: 'section-title', style: 'margin-top:10px' }, t('well.actions')), actions);
 
     this.detail.replaceChildren(h('div', { class: 'card rivets' }, ...children));
 
@@ -274,12 +286,12 @@ export class OpsPanel {
       if (!cur) return;
       const wf = s.flows.wells[id];
       if (cur.job) {
-        setText(progLbl, JOB_LABEL[cur.job.kind]);
+        setText(progLbl, t(`job.${cur.job.kind}`));
         setText(progDays, fmtDays(cur.job.daysLeft));
         setBar(progBar, 1 - cur.job.daysLeft / cur.job.total);
       }
       if (isInj) {
-        setText(v.inj, wf ? fmtRate(wf.inj) : '0 bbl/d');
+        setText(v.inj, fmtRate(wf ? wf.inj : 0));
       } else {
         setText(v.res, wf ? fmtRate(wf.reservoir) : '—');
         setText(v.cap, wf ? fmtRate(wf.liftCap) : '—');
@@ -288,7 +300,7 @@ export class OpsPanel {
         setText(v.oil, wf ? fmtRate(wf.oil) : '—');
         setText(v.wat, wf ? fmtRate(wf.water) : '—');
         setText(v.wc, wf ? fmtPct(wf.wc, 1) : '—');
-        setText(v.gas, wf ? `${wf.gas.toFixed(0)} mcf/d` : '—');
+        setText(v.gas, wf ? fmtGas(wf.gas) : '—');
         const net = wellNetPerDay(s, cur);
         setText(v.net, wf ? (net >= 0 ? '+' : '') + fmtMoney(net) : '—');
         toggleClass(v.net, 'good', net > 0);

@@ -19,6 +19,9 @@
   --mono: 'IBM Plex Mono', ui-monospace, monospace;
 }
 
+/* Barlow Condensed has no Cyrillic; Fira Sans Extra Condensed is as narrow and does. */
+html[lang='ru'] { --head: 'Fira Sans Extra Condensed', 'Arial Narrow', sans-serif; }
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -131,11 +134,11 @@ button { font: inherit; color: inherit; }
   text-transform: uppercase; color: var(--text);
   transition: filter 0.1s, transform 0.05s;
 }
-.btn:hover:not(:disabled) { filter: brightness(1.18); }
-.btn:active:not(:disabled) { transform: translateY(1px); }
-.btn:disabled { cursor: not-allowed; opacity: 0.5; filter: saturate(0.4); }
+.btn:hover:not(:disabled, [aria-disabled='true']) { filter: brightness(1.18); }
+.btn:active:not(:disabled, [aria-disabled='true']) { transform: translateY(1px); }
+.btn:disabled, .btn[aria-disabled='true'] { cursor: not-allowed; opacity: 0.5; filter: saturate(0.4); }
 .btn .cost { font-family: var(--mono); font-weight: 500; font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--amber-2); }
-.btn:disabled .cost { color: var(--dim); }
+.btn:disabled .cost, .btn[aria-disabled='true'] .cost { color: var(--dim); }
 .btn.primary { background: linear-gradient(180deg, #b9792a, #8c5719); border-color: #d18e3a; border-bottom-color: #5a3810; color: #1a1108; }
 .btn.primary .cost { color: #2a1a08; }
 .btn.danger { background: linear-gradient(180deg, #6a2e22, #4f2118); border-color: #8a3e2e; }
@@ -174,7 +177,7 @@ button { font: inherit; color: inherit; }
 }
 .brand .drop { width: 14px; height: 18px; background: var(--amber); border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%; transform: rotate(180deg); clip-path: polygon(50% 100%, 0 40%, 0 0, 100% 0, 100% 40%); }
 .stat { display: flex; flex-direction: column; justify-content: center; padding: 0 14px; border-right: 1px solid var(--line); min-width: 96px; }
-.stat .label { font-family: var(--head); font-size: 11px; letter-spacing: 0.16em; color: var(--faint); text-transform: uppercase; }
+.stat .label { font-family: var(--head); font-size: 11px; letter-spacing: 0.16em; color: var(--faint); text-transform: uppercase; white-space: nowrap; }
 .stat .value { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .stat .value small { font-size: 11px; font-weight: 400; color: var(--dim); }
 .stat canvas { display: block; }
@@ -183,6 +186,21 @@ button { font: inherit; color: inherit; }
 .speed { display: flex; align-items: center; gap: 4px; padding: 0 12px; border-left: 1px solid var(--line); }
 .speed .btn { min-width: 36px; justify-content: center; padding: 3px 6px; }
 .menu { display: flex; align-items: center; gap: 6px; padding: 0 12px; border-left: 1px solid var(--line); }
+.settings { position: relative; }
+.gear { min-width: 34px; justify-content: center; padding: 3px 7px; color: var(--dim); }
+.gear[aria-expanded='true'] { color: var(--amber-2); border-color: var(--amber); }
+.dropdown {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 40; min-width: 200px; padding: 5px 0;
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: 3px; box-shadow: 0 10px 28px rgba(0,0,0,0.65);
+}
+.dropdown .item {
+  display: block; width: 100%; text-align: left; padding: 7px 14px; background: none; border: none; cursor: pointer;
+  font-family: var(--head); font-weight: 600; font-size: 15px; letter-spacing: 0.04em; color: var(--text);
+}
+.dropdown .item:hover { background: var(--panel-3); color: var(--amber-2); }
+.dropdown .item.on::after { content: ' ✓'; color: var(--good); }
+.dropdown .sep { height: 1px; margin: 5px 0; background: var(--line); }
+.dropdown .head { padding: 3px 14px 2px; font-family: var(--head); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--faint); }
 
 /* ---------- tabs ---------- */
 
@@ -248,7 +266,7 @@ button { font: inherit; color: inherit; }
 }
 .node.bottleneck { border-color: var(--bad); box-shadow: 0 0 0 1px rgba(224,85,58,0.35), 0 0 14px rgba(224,85,58,0.2); }
 .node.bottleneck::after {
-  content: 'BOTTLENECK'; position: absolute; top: -8px; right: 8px; padding: 0 5px;
+  content: attr(data-bn); position: absolute; top: -8px; right: 8px; padding: 0 5px;
   background: var(--bad); color: #1a0d08; font-family: var(--head); font-weight: 700; font-size: 11px; letter-spacing: 0.12em; border-radius: 2px;
 }
 .node-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
@@ -262,6 +280,7 @@ button { font: inherit; color: inherit; }
 .sub-node { border-left: 2px solid var(--line-2); padding: 3px 0 3px 8px; }
 .sub-node + .sub-node { margin-top: 6px; }
 .sub-node .row { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 3px; }
+.sub-node .row .val { white-space: nowrap; }
 
 .seg { display: flex; gap: 0; margin-top: 6px; }
 .seg .btn { border-radius: 0; flex: 1; justify-content: center; }
@@ -326,6 +345,19 @@ button { font: inherit; color: inherit; }
 }
 #tooltip b { font-family: var(--head); font-size: 15px; letter-spacing: 0.04em; }
 
+/* Terms with a hover explanation. */
+.help-term { text-decoration: underline dotted var(--faint); text-underline-offset: 3px; text-decoration-thickness: 1px; cursor: help; }
+#help {
+  position: fixed; z-index: 55; pointer-events: none; width: 290px;
+  background: rgba(30,26,21,0.97); border: 1px solid var(--line-2); border-left: 3px solid var(--amber); border-radius: 3px;
+  padding: 8px 11px 9px; box-shadow: 0 8px 24px rgba(0,0,0,0.65); line-height: 1.45;
+}
+#help .help-title { font-family: var(--head); font-weight: 700; font-size: 16px; letter-spacing: 0.05em; color: var(--amber-2); margin-bottom: 3px; }
+#help .help-body { color: var(--text); }
+#help .help-note { margin-top: 6px; padding-top: 5px; border-top: 1px dashed var(--line-2); color: var(--dim); }
+#help .help-note.bad { color: #ffb3a0; }
+#help .help-note.amber { color: var(--amber-2); }
+
 .modal-backdrop { position: fixed; inset: 0; background: rgba(8,6,4,0.72); display: grid; place-items: center; z-index: 60; backdrop-filter: blur(2px); }
 .modal { width: min(440px, calc(100vw - 32px)); background: var(--panel); border: 1px solid var(--line-2); border-radius: 4px; box-shadow: 0 20px 60px rgba(0,0,0,0.7); }
 .modal header {
@@ -356,12 +388,16 @@ button { font: inherit; color: inherit; }
 
 .empty { color: var(--faint); padding: 8px 0; line-height: 1.5; }
 
+/* Below ~1340px the scene column is too narrow for log, chart and objectives side by side. */
+@media (max-width: 1340px) {
+  #bottom { grid-template-columns: 1fr 240px; }
+  #bottom > div:nth-child(2) { display: none; }
+}
+
 @media (max-width: 1180px) {
   #app { grid-template-columns: 290px 1fr 310px; }
   .brand { min-width: 0; font-size: 20px; }
   .stat { padding: 0 9px; min-width: 0; }
-  #bottom { grid-template-columns: 1fr 240px; }
-  #bottom > div:nth-child(2) { display: none; }
 }
 
 @media (max-width: 860px) {
@@ -375,9 +411,9 @@ button { font: inherit; color: inherit; }
   .panel { overflow: visible; border: none; }
   #bottom { grid-template-columns: 1fr; height: 180px; }
 }
-.btn.on:disabled { opacity: 1; filter: none; cursor: default; }
+.btn.on:disabled, .btn.on[aria-disabled='true'] { opacity: 1; filter: none; cursor: default; }
 .node.limited { border-color: #a8771f; }
 .node.limited::after {
-  content: 'LIFT LIMITED'; position: absolute; top: -8px; right: 8px; padding: 0 5px;
+  content: attr(data-ll); position: absolute; top: -8px; right: 8px; padding: 0 5px;
   background: var(--amber); color: #1a0d08; font-family: var(--head); font-weight: 700; font-size: 11px; letter-spacing: 0.12em; border-radius: 2px;
 }

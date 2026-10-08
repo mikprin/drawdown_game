@@ -68,5 +68,3 @@ export function isDrillable(s: GameState, x: number, y: number): boolean {
   const c = cellAt(s, x, y);
   return c.terrain !== 3 && c.drilled === 'none' && !(Math.abs(x - ex.hubX) <= 1 && Math.abs(y - ex.hubY) <= 1);
 }
-
-export const TERRAIN_NAMES = ['Plain', 'Hills', 'Marsh', 'Lake'];

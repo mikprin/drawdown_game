@@ -1,4 +1,5 @@
 import type { GameState } from '../game/types';
+import type { Lang } from '../i18n';
 import type { ViewMode } from '../render/stage';
 
 export interface UiState {
@@ -22,4 +23,6 @@ export interface Ctx {
   setSpeed(v: number): void;
   newGame(): void;
   save(): void;
+  /** Switch UI language and rebuild the panels. */
+  setLang(lang: Lang): void;
 }

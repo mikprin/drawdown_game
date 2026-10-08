@@ -1,7 +1,8 @@
 import { TIME } from './balance';
 import { SAVE_VERSION, emptyFlows } from './newGame';
+import { msg } from './msg';
 import { step } from './sim';
-import type { GameState } from './types';
+import type { GameState, LogKind } from './types';
 
 const KEY = 'drawdown.save';
 
@@ -12,13 +13,25 @@ export function serialize(s: GameState): string {
 
 export function deserialize(json: string): GameState | null {
   try {
-    const data = JSON.parse(json) as GameState;
+    const data = migrate(JSON.parse(json));
     if (!data || data.version !== SAVE_VERSION) return null;
     data.flows = emptyFlows();
     return data;
   } catch {
     return null;
   }
+}
+
+/** Bring older saves up to the current shape. Unknown versions are dropped. */
+function migrate(data: GameState | null): GameState | null {
+  if (!data) return null;
+  if (data.version === 1) {
+    // v1 kept log entries as finished English text; show them verbatim.
+    const old = data.log as unknown as { day: number; text: string; kind: LogKind }[];
+    data.log = old.map((e) => ({ day: e.day, kind: e.kind, msg: msg('log.raw', { text: e.text }) }));
+    data.version = 2;
+  }
+  return data;
 }
 
 export function saveGame(s: GameState): void {

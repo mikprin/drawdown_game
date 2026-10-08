@@ -2,11 +2,13 @@ import './ui/style.css';
 import * as actions from './game/actions';
 import { TIME } from './game/balance';
 import { fmtBbl, fmtMoney } from './game/format';
+import { msg } from './game/msg';
 import { newGame } from './game/newGame';
 import { reserveEstimate, wellById } from './game/reservoir';
 import { clearSave, loadGame, saveGame, simulateOffline, type OfflineReport } from './game/save';
 import { step } from './game/sim';
 import type { GameState } from './game/types';
+import { getLang, setLang, t } from './i18n';
 import { PADS } from './render/layout';
 import { iso } from './render/paint';
 import { Stage, type ViewMode } from './render/stage';
@@ -14,6 +16,7 @@ import { BottomBar } from './ui/bottom';
 import type { Ctx, UiState } from './ui/ctx';
 import { h, toggleClass } from './ui/dom';
 import { cellTooltip, ExplorePanel } from './ui/explore';
+import { HelpCard } from './ui/help';
 import { banner, modal } from './ui/modal';
 import { OpsPanel } from './ui/ops';
 import { PlantPanel } from './ui/plant';
@@ -22,6 +25,8 @@ import { TopBar } from './ui/topbar';
 const $ = (id: string) => document.getElementById(id)!;
 
 async function main(): Promise<void> {
+  document.documentElement.lang = getLang();
+  $('loading').textContent = t('loading');
   let s: GameState;
   let offline: OfflineReport | null = null;
   const loaded = loadGame();
@@ -92,23 +97,40 @@ async function main(): Promise<void> {
     },
     save() {
       persist();
-      s.log.unshift({ day: s.day, text: 'Game saved.', kind: 'info' });
+      s.log.unshift({ day: s.day, msg: msg('log.saved'), kind: 'info' });
+      refresh();
+    },
+    setLang(lang) {
+      if (lang === getLang()) return;
+      setLang(lang);
+      document.documentElement.lang = lang;
+      mountUi();
       refresh();
     },
   };
 
-  const top = new TopBar($('topbar'), ctx);
-  const ops = new OpsPanel(ctx);
-  const explore = new ExplorePanel(ctx);
-  $('left').append(ops.el, explore.el);
-  const plant = new PlantPanel(ctx);
-  $('right').append(plant.el);
-  const bottom = new BottomBar($('bottom'), ctx);
+  const helpCard = new HelpCard($('help'));
+  let top: TopBar, ops: OpsPanel, explore: ExplorePanel, plant: PlantPanel, bottom: BottomBar;
+  let siteTab: HTMLButtonElement, mapTab: HTMLButtonElement, hint: HTMLDivElement;
 
-  const siteTab = h('button', { class: 'btn', onclick: () => ctx.setView('site') }, 'Site');
-  const mapTab = h('button', { class: 'btn', onclick: () => ctx.setView('map') }, 'Regional map');
-  const hint = h('div', { class: 'view-hint' });
-  view.append(h('div', { class: 'view-tabs' }, siteTab, mapTab), hint);
+  /** Build every DOM panel from scratch. Panels read strings once, so a language switch rebuilds them. */
+  function mountUi(): void {
+    helpCard.hide();
+    for (const id of ['topbar', 'left', 'right', 'bottom']) $(id).replaceChildren();
+    view.querySelectorAll('.view-tabs, .view-hint').forEach((el) => el.remove());
+    top = new TopBar($('topbar'), ctx);
+    ops = new OpsPanel(ctx);
+    explore = new ExplorePanel(ctx);
+    $('left').append(ops.el, explore.el);
+    plant = new PlantPanel(ctx);
+    $('right').append(plant.el);
+    bottom = new BottomBar($('bottom'), ctx);
+    siteTab = h('button', { class: 'btn', onclick: () => ctx.setView('site') }, t('view.site'));
+    mapTab = h('button', { class: 'btn', onclick: () => ctx.setView('map') }, t('view.map'));
+    hint = h('div', { class: 'view-hint' });
+    view.append(h('div', { class: 'view-tabs' }, siteTab, mapTab), hint);
+  }
+  mountUi();
 
   const tooltip = $('tooltip');
   stage.site.onSelectWell = (id) => ctx.selectWell(id);
@@ -138,16 +160,15 @@ async function main(): Promise<void> {
     bottom.update();
     toggleClass(siteTab, 'on', ui.view === 'site');
     toggleClass(mapTab, 'on', ui.view === 'map');
-    hint.textContent = ui.view === 'site'
-      ? 'Drag to pan · wheel to zoom · click a well · Space pauses · M toggles map'
-      : 'Click a cell · seismic lifts the fog block by block · drill the best leads';
+    hint.textContent = t(ui.view === 'site' ? 'view.hintSite' : 'view.hintMap');
+    helpCard.update();
     if (s.stats.wildcats > seen.wildcats) {
       if (s.stats.discoveries > seen.discoveries) {
         const f = s.fields[s.fields.length - 1];
         const est = reserveEstimate(f);
-        banner(view, est.p50 > 1_500_000 ? 'GUSHER!' : 'DISCOVERY', `${f.name} · P50 ${fmtBbl(est.p50)} recoverable`);
+        banner(view, t(est.p50 > 1_500_000 ? 'banner.gusher' : 'banner.discovery'), t('banner.discoverySub', { field: f.name, p50: est.p50 }));
       } else {
-        banner(view, 'DRY HOLE', 'Nothing but brine and regret.', 'dry');
+        banner(view, t('banner.dry'), t('banner.drySub'), 'dry');
       }
       seen = { wildcats: s.stats.wildcats, discoveries: s.stats.discoveries };
     }
@@ -186,7 +207,7 @@ async function main(): Promise<void> {
       persist();
     } else if (hiddenAt && ui.speed > 0) {
       const r = simulateOffline(s, ((Date.now() - hiddenAt) / 1000) * ui.speed);
-      if (r) s.log.unshift({ day: s.day, text: `Caught up ${Math.round(r.days)} days while away: ${fmtMoney(r.cash)}.`, kind: 'info' });
+      if (r) s.log.unshift({ day: s.day, msg: msg('log.caughtUp', { days: Math.round(r.days), cash: r.cash }), kind: 'info' });
       hiddenAt = 0;
       refresh();
     }
@@ -220,24 +241,26 @@ async function main(): Promise<void> {
   refresh();
 
   if (offline && offline.days >= 5) {
-    modal('While you were away', h('div', null,
-      h('p', null, `${Math.round(offline.days)} days passed on the field${offline.days >= 365 ? ' (offline progress is capped at one year)' : ''}.`),
+    modal(t('away.title'), h('div', null,
+      h('p', null, t('away.days', { days: Math.round(offline.days) })),
+      offline.days >= 365 ? h('p', { class: 'muted' }, t('away.cap')) : null,
       h('div', { class: 'kv' },
-        h('span', { class: 'k' }, 'Oil produced'), h('span', { class: 'v oil' }, fmtBbl(offline.oil)),
-        h('span', { class: 'k' }, 'Oil sold'), h('span', { class: 'v' }, fmtBbl(offline.sold)),
-        h('span', { class: 'k' }, 'Cash change'), h('span', { class: `v ${offline.cash >= 0 ? 'good' : 'bad'}` }, fmtMoney(offline.cash)))),
-      [{ label: 'Back to work', cls: 'primary' }]);
+        h('span', { class: 'k' }, t('away.oil')), h('span', { class: 'v oil' }, fmtBbl(offline.oil)),
+        h('span', { class: 'k' }, t('away.sold')), h('span', { class: 'v' }, fmtBbl(offline.sold)),
+        h('span', { class: 'k' }, t('away.cash')), h('span', { class: `v ${offline.cash >= 0 ? 'good' : 'bad'}` }, fmtMoney(offline.cash)))),
+      [{ label: t('away.ok'), cls: 'primary' }]);
   } else if (!loaded) {
-    modal('Drawdown', h('div', null,
-      h('p', null, 'You inherit one tired pumpjack on the Old Barrow field. Production falls on its own — that is the decline curve, and fighting it is the job.'),
-      h('p', null, 'Watch the plant on the right: separator, tanks, export and water handling each cap your output. The red BOTTLENECK moves as you grow.'),
-      h('p', { class: 'muted' }, 'Wells water out over time. Waterflood, better lift and fracs push back. When the home field fades, the regional map holds the next one — if you can find it.')),
-      [{ label: 'Start pumping', cls: 'primary' }]);
+    modal(t('intro.title'), h('div', null,
+      h('p', null, t('intro.p1')),
+      h('p', null, t('intro.p2')),
+      h('p', { class: 'muted' }, t('intro.p3')),
+      h('p', { class: 'muted' }, t('intro.p4'))),
+      [{ label: t('intro.ok'), cls: 'primary' }]);
   }
 }
 
 main().catch((err) => {
   console.error(err);
   const el = document.getElementById('loading');
-  if (el) el.textContent = `Failed to start: ${err instanceof Error ? err.message : String(err)}`;
+  if (el) el.textContent = t('loading.failed', { error: err instanceof Error ? err.message : String(err) });
 });

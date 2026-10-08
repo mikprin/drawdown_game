@@ -6,6 +6,7 @@ import { MANIFOLD, PADS, PIPELINE, ROAD, SPOTS, WORLD, padOutlet, slotPos } from
 import { iso, spriteOf, ZT, type Baked } from './paint';
 import { FLARE_TIP_Z, PALETTE, type SpriteBank, type WellheadKind } from './sprites';
 import { fmtRate } from '../game/format';
+import { t as tr } from '../i18n';
 
 type WellKind = 'pumpjack' | WellheadKind | 'drill';
 
@@ -294,7 +295,7 @@ export class SiteView {
       }
       let oil = 0;
       for (const w of s.wells) if (w.fieldId === f.id) oil += s.flows.wells[w.id]?.oil ?? 0;
-      t.text = f.devJob ? `${f.name.toUpperCase()} · building` : `${f.name.toUpperCase()} · ${fmtRate(oil)}`;
+      t.text = `${f.name.toUpperCase()} · ${f.devJob ? tr('site.building') : fmtRate(oil)}`;
     }
     for (const [id, t] of this.padLabels) if (!seen.has(id)) { t.destroy(); this.padLabels.delete(id); }
   }

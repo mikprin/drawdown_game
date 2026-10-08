@@ -16,9 +16,6 @@ export const TIME = {
 };
 
 export interface LiftDef {
-  name: string;
-  short: string;
-  desc: string;
   /** Max liquid, bbl/d. Natural flow is scaled by pressure². */
   capacity: number;
   cost: number;
@@ -32,9 +29,6 @@ export interface LiftDef {
 
 export const LIFTS: Record<LiftType, LiftDef> = {
   flowing: {
-    name: 'Natural flow',
-    short: 'FLOW',
-    desc: 'Reservoir pressure pushes fluid up. Free, but dies as pressure falls.',
     capacity: 700,
     cost: 0,
     installDays: 0,
@@ -43,9 +37,6 @@ export const LIFTS: Record<LiftType, LiftDef> = {
     wearPerDay: 0.0008,
   },
   rodpump: {
-    name: 'Rod pump',
-    short: 'ROD',
-    desc: 'Classic pumpjack. Cheap and robust, low capacity.',
     capacity: 260,
     cost: 60_000,
     installDays: 3,
@@ -54,9 +45,6 @@ export const LIFTS: Record<LiftType, LiftDef> = {
     wearPerDay: 0.0022,
   },
   gaslift: {
-    name: 'Gas lift',
-    short: 'GL',
-    desc: 'Injects compressed gas to lighten the fluid column. Needs a compressor.',
     capacity: 1200,
     cost: 150_000,
     installDays: 4,
@@ -66,9 +54,6 @@ export const LIFTS: Record<LiftType, LiftDef> = {
     requiresFacility: 'compressor',
   },
   esp: {
-    name: 'ESP',
-    short: 'ESP',
-    desc: 'Electric submersible pump. Huge capacity, power-hungry, wears fast.',
     capacity: 3500,
     cost: 280_000,
     installDays: 5,
@@ -86,9 +71,6 @@ export interface FacilityLevel {
 }
 
 export interface FacilityDef {
-  name: string;
-  desc: string;
-  unit: string;
   /** 'levels': discrete tiers. 'count': buy N units of `per.value` each. */
   kind: 'levels' | 'count';
   levels?: FacilityLevel[];
@@ -98,9 +80,6 @@ export interface FacilityDef {
 
 export const FACILITIES: Record<FacilityId, FacilityDef> = {
   separator: {
-    name: 'Separator',
-    desc: 'Splits well fluid into oil, gas and water. Caps total liquid.',
-    unit: 'bbl/d liquid',
     kind: 'levels',
     levels: [
       { value: 600, cost: 0, opexDay: 50 },
@@ -111,9 +90,6 @@ export const FACILITIES: Record<FacilityId, FacilityDef> = {
     ],
   },
   storage: {
-    name: 'Tank farm',
-    desc: 'Buffers oil between production and export. Full tanks choke the wells.',
-    unit: 'bbl',
     kind: 'levels',
     levels: [
       { value: 1500, cost: 0, opexDay: 10 },
@@ -124,16 +100,10 @@ export const FACILITIES: Record<FacilityId, FacilityDef> = {
     ],
   },
   trucks: {
-    name: 'Oil trucks',
-    desc: 'Haul crude to the local refinery. $3.50/bbl.',
-    unit: 'bbl/d',
     kind: 'count',
     per: { value: 150, baseCost: 18_000, growth: 1.14, opexDay: 0, max: 40 },
   },
   pipeline: {
-    name: 'Export pipeline',
-    desc: 'Cheap bulk export ($0.70/bbl) into a deeper market — sales move price less.',
-    unit: 'bbl/d',
     kind: 'levels',
     levels: [
       { value: 0, cost: 0, opexDay: 0 },
@@ -142,16 +112,10 @@ export const FACILITIES: Record<FacilityId, FacilityDef> = {
     ],
   },
   waterTrucks: {
-    name: 'Water trucks',
-    desc: 'Haul produced water away. Expensive: $1.80/bbl.',
-    unit: 'bbl/d',
     kind: 'count',
     per: { value: 250, baseCost: 15_000, growth: 1.14, opexDay: 0, max: 40 },
   },
   swd: {
-    name: 'Disposal well',
-    desc: 'Salt-water disposal well. $0.35/bbl.',
-    unit: 'bbl/d',
     kind: 'levels',
     levels: [
       { value: 0, cost: 0, opexDay: 0 },
@@ -161,9 +125,6 @@ export const FACILITIES: Record<FacilityId, FacilityDef> = {
     ],
   },
   injection: {
-    name: 'Injection pumps',
-    desc: 'Waterflood: re-inject water to hold pressure and sweep more oil. Uses produced water first.',
-    unit: 'bbl/d',
     kind: 'levels',
     requiresTech: 'waterflood',
     levels: [
@@ -175,9 +136,6 @@ export const FACILITIES: Record<FacilityId, FacilityDef> = {
     ],
   },
   compressor: {
-    name: 'Gas compressor',
-    desc: 'Compresses associated gas for sale ($2.80/mcf) instead of flaring. Enables gas lift.',
-    unit: 'mcf/d',
     kind: 'levels',
     levels: [
       { value: 0, cost: 0, opexDay: 0 },
@@ -189,8 +147,6 @@ export const FACILITIES: Record<FacilityId, FacilityDef> = {
 };
 
 export interface TechDef {
-  name: string;
-  desc: string;
   cost: number;
   requires?: TechId[];
   comingSoon?: boolean;
@@ -198,49 +154,33 @@ export interface TechDef {
 
 export const TECHS: Record<TechId, TechDef> = {
   wellPad: {
-    name: 'Well pad',
-    desc: 'Grow the lone pumpjack into a multi-well pad: 4 well slots on the home field.',
     cost: 120_000,
   },
   exploration: {
-    name: 'Exploration license',
-    desc: 'Unlocks the regional map: 2D seismic and wildcat drilling.',
     cost: 400_000,
     requires: ['wellPad'],
   },
   waterflood: {
-    name: 'Waterflood',
-    desc: 'Convert wells to injectors and build injection pumps. Raises recovery factor.',
     cost: 250_000,
     requires: ['wellPad'],
   },
   esp: {
-    name: 'ESP technology',
-    desc: 'Electric submersible pumps: lift thousands of barrels of liquid per day.',
     cost: 180_000,
     requires: ['wellPad'],
   },
   maintCrew: {
-    name: 'Maintenance crew',
-    desc: 'Auto-services worn equipment and repairs failures. $400/day wages.',
     cost: 150_000,
     requires: ['wellPad'],
   },
   seismic3d: {
-    name: '3D seismic',
-    desc: 'Sharper chance estimates, detects every lead and estimates its size.',
     cost: 600_000,
     requires: ['exploration'],
   },
   scada: {
-    name: 'SCADA optimizer',
-    desc: 'When the plant is constrained, choke the wettest wells first.',
     cost: 400_000,
     requires: ['wellPad'],
   },
   offshore: {
-    name: 'Shallow-water license',
-    desc: 'Jack-up rigs on the continental shelf. Next tier — coming soon.',
     cost: 60_000_000,
     requires: ['exploration', 'waterflood'],
     comingSoon: true,

@@ -1,3 +1,5 @@
+import type { Msg } from './msg';
+
 export type LiftType = 'flowing' | 'rodpump' | 'gaslift' | 'esp';
 
 export type FacilityId =
@@ -169,9 +171,11 @@ export type LogKind = 'info' | 'good' | 'bad' | 'jackpot';
 
 export interface LogEntry {
   day: number;
-  text: string;
+  msg: Msg;
   kind: LogKind;
 }
+
+export type CostId = 'wellOpex' | 'liftPower' | 'facilities' | 'water' | 'transport' | 'flaring' | 'wages';
 
 export type Bottleneck = 'none' | 'separator' | 'water' | 'storage';
 
@@ -213,7 +217,7 @@ export interface Flows {
   gasFlared: number;
   salePrice: number;
   revenue: number;
-  costs: Record<string, number>;
+  costs: Partial<Record<CostId, number>>;
   costTotal: number;
   profit: number;
 }

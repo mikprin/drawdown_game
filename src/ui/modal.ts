@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { h } from './dom';
 
 export function modal(title: string, body: Node | string, buttons: { label: string; cls?: string; onClick?: () => void }[]): () => void {
@@ -16,7 +17,7 @@ export function modal(title: string, body: Node | string, buttons: { label: stri
 }
 
 export function confirmModal(title: string, text: string, okLabel: string, onOk: () => void): void {
-  modal(title, text, [{ label: 'Cancel', cls: 'ghost' }, { label: okLabel, cls: 'danger', onClick: onOk }]);
+  modal(title, text, [{ label: t('modal.cancel'), cls: 'ghost' }, { label: okLabel, cls: 'danger', onClick: onOk }]);
 }
 
 /** Big transient headline over the scene (discoveries, dry holes). */

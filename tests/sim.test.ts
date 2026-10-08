@@ -3,7 +3,7 @@ import {
   buyFacility, buyTech, convertToInjector, developField, drillWell, drillWildcat, setSellMode,
   surveyBlock,
 } from '../src/game/actions';
-import { newGame } from '../src/game/newGame';
+import { newGame, SAVE_VERSION } from '../src/game/newGame';
 import { recoverable, reserveEstimate, waterCut } from '../src/game/reservoir';
 import { deserialize, serialize, simulateOffline } from '../src/game/save';
 import { step } from '../src/game/sim';
@@ -148,6 +148,16 @@ describe('persistence', () => {
     run(s, 30);
     run(t, 30);
     expect(t.cash).toBeCloseTo(s.cash, 6);
+  });
+
+  it('migrates v1 saves with plain-text log entries', () => {
+    const s = newGame(5);
+    const v1 = JSON.parse(serialize(s));
+    v1.version = 1;
+    v1.log = [{ day: 3, text: 'Barrow-2 is drilled and on production.', kind: 'good' }];
+    const t = deserialize(JSON.stringify(v1))!;
+    expect(t.version).toBe(SAVE_VERSION);
+    expect(t.log[0]).toEqual({ day: 3, kind: 'good', msg: { key: 'log.raw', params: { text: 'Barrow-2 is drilled and on production.' } } });
   });
 
   it('caps offline progress', () => {

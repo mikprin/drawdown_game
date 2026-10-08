@@ -1,15 +1,19 @@
 import { buyFacility, buyTech, setSellMode, setThreshold, techLockReason } from '../game/actions';
-import { FACILITIES, TECHS } from '../game/balance';
-import { fmtBbl, fmtMoney, fmtNum, fmtPct } from '../game/format';
+import { TECHS } from '../game/balance';
+import { fmtGasNum, fmtMoney, fmtNum, fmtPrice } from '../game/format';
 import { cap, facilityNextValue } from '../game/reservoir';
-import type { FacilityId, SellMode, TechId } from '../game/types';
+import type { CostId, FacilityId, SellMode, TechId } from '../game/types';
+import { t, type HelpId, type MsgKey } from '../i18n';
 import { ActionButton, bar, h, setBar, setText, toggleClass } from './dom';
 import type { Ctx } from './ctx';
+import { help, term, type HelpSource, type HelpView } from './help';
 
 interface Gauge {
   val: HTMLElement;
   bar: HTMLElement;
 }
+
+const facHelp = (id: FacilityId): HelpView => ({ title: t(`fac.${id}.name`), body: t(`fac.${id}.desc`) });
 
 export class PlantPanel {
   readonly el = h('div');
@@ -30,76 +34,92 @@ export class PlantPanel {
       this.g[key] = { val: h('span', { class: 'val' }), bar: bar(kind) };
       return this.g[key];
     };
-    const upg = (id: FacilityId, label: string) => {
+    const upg = (id: FacilityId, labelKey: MsgKey) => {
+      const label = t(labelKey);
+      const fmtValue = id === 'compressor' ? fmtGasNum : fmtNum;
       const b = new ActionButton(label, () => buyFacility(ctx.s, id, true), () => ctx.act((s) => buyFacility(s, id)), {
         cls: 'small',
-        hint: FACILITIES[id].desc,
+        help: () => facHelp(id),
         labelFn: () => {
           const nv = facilityNextValue(id, ctx.s.facilities[id]);
-          return nv === null ? `${label} · max` : `${label} → ${fmtNum(nv)}`;
+          return nv === null ? `${label} · ${t('plant.max')}` : `${label} → ${fmtValue(nv)}`;
         },
       });
       this.buttons.push(b);
       return b.el;
     };
-    const node = (key: string, name: string, gk: string, kind: string, ...extra: (Node | null)[]) => {
+    // A plant stage flagged as the bottleneck says so in its card.
+    const withNote = (base: () => HelpView, note: () => string | null): HelpSource => () => {
+      const n = note();
+      return n ? { ...base(), note: n, noteCls: 'bad' } : base();
+    };
+    const bnNote = (k: string) => () => (ctx.s.flows.bottleneck === k ? `${t('plant.bottleneckNote')} ${t('help.bottleneck.b')}` : null);
+    const node = (key: string, nameKey: MsgKey, src: HelpSource, gk: string, kind: string, ...extra: (Node | null)[]) => {
       const gg = gauge(gk, kind);
-      this.nodes[key] = h('div', { class: 'node' },
-        h('div', { class: 'node-head' }, h('span', { class: 'nm' }, name), gg.val),
+      this.nodes[key] = h('div', { class: 'node', 'data-bn': t('plant.bottleneck'), 'data-ll': t('plant.liftLimited') },
+        h('div', { class: 'node-head' }, help(h('span', { class: 'nm' }, t(nameKey)), src), gg.val),
         gg.bar, ...extra);
       return this.nodes[key];
     };
-    const sub = (label: string, gk: string, kind: string, ...btns: Node[]) => {
+    const sub = (labelKey: MsgKey, src: HelpSource, gk: string, kind: string, ...btns: Node[]) => {
       const gg = gauge(gk, kind);
       return h('div', { class: 'sub-node' },
-        h('div', { class: 'row' }, h('span', { class: 'muted' }, label), gg.val), gg.bar,
+        h('div', { class: 'row' }, help(h('span', { class: 'muted' }, t(labelKey)), src), gg.val), gg.bar,
         btns.length ? h('div', { class: 'btn-row' }, ...btns) : null);
     };
     const arrow = () => h('div', { class: 'flow-arrow' });
+    const title = (key: MsgKey, id: HelpId, ...aside: Node[]) =>
+      h('div', { class: 'section-title' }, help(h('span', null, t(key)), id), ...aside);
 
+    const mode = (m: SellMode, key: MsgKey, id: HelpId) =>
+      help(h('button', { class: 'btn small', onclick: () => ctx.act((s) => setSellMode(s, m)) }, t(key)), id, false);
     this.modeBtns = {
-      auto: h('button', { class: 'btn small', onclick: () => ctx.act((s) => setSellMode(s, 'auto')), title: 'Sell everything export capacity allows' }, 'Auto'),
-      threshold: h('button', { class: 'btn small', onclick: () => ctx.act((s) => setSellMode(s, 'threshold')), title: 'Sell only when the realised price is above your floor' }, 'Floor'),
-      hold: h('button', { class: 'btn small', onclick: () => ctx.act((s) => setSellMode(s, 'hold')), title: 'Store oil, sell nothing. Full tanks choke the wells.' }, 'Hold'),
+      auto: mode('auto', 'mode.auto', 'sellAuto'),
+      threshold: mode('threshold', 'mode.floor', 'sellFloor'),
+      hold: mode('hold', 'mode.hold', 'sellHold'),
     };
-    this.threshRow = h('div', { class: 'stepper' },
-      h('button', { class: 'btn small', onclick: () => ctx.act((s) => setThreshold(s, s.market.threshold - 5)) }, '−5'),
-      h('button', { class: 'btn small', onclick: () => ctx.act((s) => setThreshold(s, s.market.threshold - 1)) }, '−1'),
-      this.thresh,
-      h('button', { class: 'btn small', onclick: () => ctx.act((s) => setThreshold(s, s.market.threshold + 1)) }, '+1'),
-      h('button', { class: 'btn small', onclick: () => ctx.act((s) => setThreshold(s, s.market.threshold + 5)) }, '+5'),
-    );
+    const step = (d: number) =>
+      h('button', { class: 'btn small', onclick: () => ctx.act((s) => setThreshold(s, s.market.threshold + d)) }, d > 0 ? `+${d}` : `−${-d}`);
+    this.threshRow = h('div', { class: 'stepper' }, step(-5), step(-1), this.thresh, step(1), step(5));
+
+    const liftNote = () => {
+      const n = ctx.s.flows.liftLimitedWells;
+      return n > 0 ? `${t('plant.liftLimitedNote', { n })} ${t('help.liftLimited.b')}` : null;
+    };
+    const injNote = () => t('plant.injNote', { v: ctx.s.flows.injFromProduced });
 
     this.el.append(
       h('div', { class: 'section' },
-        h('div', { class: 'section-title' }, 'Plant'),
-        node('wells', 'Wells', 'wells', 'good'),
+        title('plant.title', 'plant'),
+        node('wells', 'plant.wells', withNote(() => term('wellsNode'), liftNote), 'wells', 'good'),
         arrow(),
-        node('separator', 'Separator', 'sep', '', h('div', { class: 'btn-row' }, upg('separator', 'Upgrade'))),
+        node('separator', 'plant.separator', withNote(() => facHelp('separator'), bnNote('separator')), 'sep', '',
+          h('div', { class: 'btn-row' }, upg('separator', 'plant.upgrade'))),
         arrow(),
         h('div', { class: 'split' },
-          node('storage', 'Oil → Tanks', 'tank', '', h('div', { class: 'btn-row' }, upg('storage', 'Tanks'))),
-          node('export', 'Export', 'export', '',
-            h('div', { class: 'btn-row' }, upg('trucks', 'Truck'), upg('pipeline', 'Pipeline'))),
-          node('water', 'Water', 'water', 'water',
+          node('storage', 'plant.tanks', withNote(() => facHelp('storage'), bnNote('storage')), 'tank', '',
+            h('div', { class: 'btn-row' }, upg('storage', 'plant.tanksBtn'))),
+          node('export', 'plant.export', 'export', 'export', '',
+            h('div', { class: 'btn-row' }, upg('trucks', 'plant.truck'), upg('pipeline', 'plant.pipeline'))),
+          node('water', 'plant.water', withNote(() => term('water'), bnNote('water')), 'water', 'water',
             h('div', { style: 'margin-top:8px' },
-              sub('Re-injection', 'inj', 'water', upg('injection', 'Pumps')),
-              sub('Disposal well', 'swd', 'water', upg('swd', 'SWD')),
-              sub('Water trucks', 'wtr', 'water', upg('waterTrucks', 'Truck')))),
-          node('gas', 'Gas', 'gas', 'gas',
+              sub('plant.reinj', () => ({ ...facHelp('injection'), note: injNote() }), 'inj', 'water', upg('injection', 'plant.pumps')),
+              sub('plant.swd', () => facHelp('swd'), 'swd', 'water', upg('swd', 'plant.swdBtn')),
+              sub('plant.wtrucks', () => facHelp('waterTrucks'), 'wtr', 'water', upg('waterTrucks', 'plant.truck')))),
+          node('gas', 'plant.gas', 'gas', 'gas', 'gas',
             h('div', { style: 'margin-top:8px' },
-              sub('Sold via compressor', 'gsold', 'gas', upg('compressor', 'Compressor')),
-              sub('Flared', 'gflare', 'gas'))),
+              sub('plant.gasSold', () => facHelp('compressor'), 'gsold', 'gas', upg('compressor', 'plant.compressor')),
+              sub('plant.flared', 'flaring', 'gflare', 'gas'))),
         ),
       ),
       h('div', { class: 'section' },
-        h('div', { class: 'section-title' }, 'Crude market', this.storageAside),
-        this.price, this.priceSub,
+        title('market.title', 'market', this.storageAside),
+        this.price, help(this.priceSub, 'impact', false),
         h('div', { class: 'seg' }, this.modeBtns.auto, this.modeBtns.threshold, this.modeBtns.hold),
         this.threshRow,
       ),
-      h('div', { class: 'section' }, h('div', { class: 'section-title' }, 'Daily P&L'), this.pnl),
-      h('div', { class: 'section' }, h('div', { class: 'section-title' }, 'Technology'), this.buildTechs()),
+      h('div', { class: 'section' }, title('pnl.title', 'pnl'), this.pnl),
+      h('div', { class: 'section' }, title('tech.title', 'tech'), this.buildTechs()),
     );
   }
 
@@ -107,9 +127,9 @@ export class PlantPanel {
     const ctx = this.ctx;
     const wrap = h('div');
     for (const id of Object.keys(TECHS) as TechId[]) {
-      const def = TECHS[id];
-      const btn = new ActionButton('Buy', () => buyTech(ctx.s, id, true), () => ctx.act((s) => buyTech(s, id)), { cls: 'small primary' });
-      const el = h('div', { class: 'tech' }, h('span', { class: 'nm' }, def.name), btn.el, h('div', { class: 'desc' }, def.desc));
+      const view = () => ({ title: t(`tech.${id}.name`), body: t(`tech.${id}.desc`) });
+      const btn = new ActionButton(t('btn.buy'), () => buyTech(ctx.s, id, true), () => ctx.act((s) => buyTech(s, id)), { cls: 'small primary', help: view });
+      const el = h('div', { class: 'tech' }, h('span', { class: 'nm' }, t(`tech.${id}.name`)), btn.el, h('div', { class: 'desc' }, t(`tech.${id}.desc`)));
       this.techRows.push({ id, el, btn });
       wrap.append(el);
     }
@@ -119,58 +139,53 @@ export class PlantPanel {
   update(): void {
     const s = this.ctx.s;
     const fl = s.flows;
+    const bpd = ' ' + t('unit.bpd');
+    const gas = ' ' + t('unit.gas');
     const set = (k: string, num: number, den: number, unit = '', fmt = fmtNum) => {
       const gg = this.g[k];
       gg.val.innerHTML = `<b>${fmt(num)}</b> / ${fmt(den)}${unit}`;
       setBar(gg.bar, den > 0 ? num / den : 0);
     };
-    set('wells', fl.liquid, fl.liquidPotential, ' bbl/d');
-    this.g.wells.val.title = 'Liquid flowing vs. what the wells could deliver';
-    set('sep', fl.liquid, fl.sepCap, ' bbl/d');
-    set('tank', s.storage, fl.storageCap || cap(s, 'storage'), ' bbl');
-    set('export', fl.sold, fl.exportCap, ' bbl/d');
-    set('water', fl.water, fl.waterCap, ' bbl/d');
-    set('inj', fl.injected, cap(s, 'injection'), ' bbl/d');
-    this.g.inj.val.title = `${fmtNum(fl.injFromProduced)} bbl/d from produced water; injector wells limit intake`;
-    set('swd', fl.swd, cap(s, 'swd'), ' bbl/d');
-    set('wtr', fl.waterTrucked, cap(s, 'waterTrucks'), ' bbl/d');
-    set('gas', fl.gasSold, fl.gas, ' mcf/d sold');
-    set('gsold', fl.gasSold, cap(s, 'compressor'), ' mcf/d');
-    this.g.gflare.val.innerHTML = `<b>${fmtNum(fl.gasFlared)}</b> mcf/d`;
+    set('wells', fl.liquid, fl.liquidPotential, bpd);
+    set('sep', fl.liquid, fl.sepCap, bpd);
+    set('tank', s.storage, fl.storageCap || cap(s, 'storage'), ' ' + t('unit.bbl'));
+    set('export', fl.sold, fl.exportCap, bpd);
+    set('water', fl.water, fl.waterCap, bpd);
+    set('inj', fl.injected, cap(s, 'injection'), bpd);
+    set('swd', fl.swd, cap(s, 'swd'), bpd);
+    set('wtr', fl.waterTrucked, cap(s, 'waterTrucks'), bpd);
+    set('gas', fl.gasSold, fl.gas, `${gas} ${t('plant.sold')}`, fmtGasNum);
+    set('gsold', fl.gasSold, cap(s, 'compressor'), gas, fmtGasNum);
+    this.g.gflare.val.innerHTML = `<b>${fmtGasNum(fl.gasFlared)}</b>${gas}`;
     setBar(this.g.gflare.bar, fl.gas > 0 ? fl.gasFlared / fl.gas : 0);
 
     for (const k of ['separator', 'storage', 'water'] as const) toggleClass(this.nodes[k], 'bottleneck', fl.bottleneck === k);
     toggleClass(this.nodes.wells, 'limited', fl.liftLimitedWells > 0);
-    this.nodes.wells.title = fl.liftLimitedWells > 0 ? `${fl.liftLimitedWells} well(s) limited by their lift — upgrade artificial lift` : '';
     for (const b of this.buttons) b.update();
 
     const m = s.market;
     const sale = m.price * (1 - m.impact);
-    setText(this.price, `$${m.price.toFixed(2)}`);
-    setText(this.priceSub, `You realise $${sale.toFixed(2)} · market impact −${fmtPct(m.impact, 1)}`);
-    setText(this.storageAside, `${fmtBbl(s.storage)} in tanks`);
+    setText(this.price, fmtPrice(m.price));
+    setText(this.priceSub, t('market.realise', { sale, impact: m.impact }));
+    setText(this.storageAside, t('market.inTanks', { v: s.storage }));
     for (const mode of Object.keys(this.modeBtns) as SellMode[]) toggleClass(this.modeBtns[mode], 'on', m.sellMode === mode);
     this.threshRow.style.display = m.sellMode === 'threshold' ? '' : 'none';
-    setText(this.thresh, `sell ≥ $${m.threshold}`);
+    setText(this.thresh, t('market.sellAbove', { v: m.threshold }));
 
-    const rows: [string, number, string][] = [['Oil & gas sales', fl.revenue, 'good']];
-    for (const [k, v] of Object.entries(fl.costs)) if (v > 0.5) rows.push([k, -v, '']);
+    const rows: [string, number, string][] = [[t('pnl.sales'), fl.revenue, 'good']];
+    for (const [k, v] of Object.entries(fl.costs) as [CostId, number][]) if (v > 0.5) rows.push([t(`cost.${k}`), -v, '']);
     const html = rows.map(([k, v, c]) => `<span class="muted">${k}</span><span class="num ${c}">${v >= 0 ? '+' : ''}${fmtMoney(v)}</span>`).join('') +
-      `<span class="total">Net</span><span class="total num ${fl.profit >= 0 ? 'good' : 'bad'}">${fl.profit >= 0 ? '+' : ''}${fmtMoney(fl.profit)}</span>`;
+      `<span class="total">${t('pnl.net')}</span><span class="total num ${fl.profit >= 0 ? 'good' : 'bad'}">${fl.profit >= 0 ? '+' : ''}${fmtMoney(fl.profit)}</span>`;
     if (this.pnl.innerHTML !== html) this.pnl.innerHTML = html;
 
-    for (const t of this.techRows) {
-      const owned = s.techs[t.id];
-      toggleClass(t.el, 'owned', owned);
-      t.btn.el.style.display = owned ? 'none' : '';
-      const lock = techLockReason(s, t.id);
-      t.btn.setLabel(lock && lock !== 'Owned' && !lock.startsWith('Need') ? 'Locked' : 'Buy');
-      t.btn.update();
-      if (!owned) {
-        const cost = fmtMoney(TECHS[t.id].cost);
-        const costEl = t.btn.el.querySelector('.cost')!;
-        setText(costEl, cost);
-      }
+    for (const row of this.techRows) {
+      const owned = s.techs[row.id];
+      toggleClass(row.el, 'owned', owned);
+      row.btn.el.style.display = owned ? 'none' : '';
+      const lock = techLockReason(s, row.id);
+      row.btn.setLabel(t(lock && lock.key !== 'reason.owned' ? 'btn.locked' : 'btn.buy'));
+      row.btn.update();
+      if (!owned) setText(row.btn.el.querySelector('.cost')!, fmtMoney(TECHS[row.id].cost));
     }
   }
 }
