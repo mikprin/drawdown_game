@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buyFacility, buyTech, convertToInjector, developField, drillWell, drillWildcat, setSellMode,
-  surveyBlock,
+  setSellWhenFull, setThreshold, surveyBlock,
 } from '../src/game/actions';
 import { newGame, SAVE_VERSION } from '../src/game/newGame';
 import { recoverable, reserveEstimate, waterCut } from '../src/game/reservoir';
@@ -46,6 +46,22 @@ describe('production', () => {
     const wc0 = waterCut(f, w);
     f.np = recoverable(f) * 0.7;
     expect(waterCut(f, w)).toBeGreaterThan(wc0 + 0.3);
+  });
+
+  it('floor mode with "sell when full" sells only the overflow once tanks fill', () => {
+    const s = rich();
+    setSellMode(s, 'threshold');
+    setThreshold(s, 200);
+    setSellWhenFull(s, true);
+    run(s, 400);
+    expect(s.storage).toBeCloseTo(s.flows.storageCap, 3);
+    expect(s.flows.sold).toBeGreaterThan(0);
+    expect(s.flows.sold).toBeCloseTo(s.flows.oil, 3);
+    expect(s.flows.bottleneck).not.toBe('storage');
+
+    setSellWhenFull(s, false);
+    run(s, 5);
+    expect(s.flows.sold).toBe(0);
   });
 
   it('respects separator, storage and water limits', () => {

@@ -71,6 +71,10 @@ export function setSellMode(s: GameState, mode: SellMode): void {
   s.market.sellMode = mode;
 }
 
+export function setSellWhenFull(s: GameState, on: boolean): void {
+  s.market.sellWhenFull = on;
+}
+
 export function setThreshold(s: GameState, v: number): void {
   s.market.threshold = Math.max(10, Math.min(200, Math.round(v)));
 }

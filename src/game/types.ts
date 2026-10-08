@@ -156,6 +156,8 @@ export interface Market {
   impact: number;
   sellMode: SellMode;
   threshold: number;
+  /** Floor mode: when the tanks are full, sell the overflow at any price. */
+  sellWhenFull?: boolean;
 }
 
 export interface History {

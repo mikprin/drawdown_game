@@ -175,7 +175,9 @@ export function computeFlows(s: GameState, dt: number): Flows {
   const exportCap = exportCapacity(s);
   const price = salePrice(s);
   const selling = isSelling(s);
-  const oilRoom = Math.max(0, storageCap - s.storage + (selling ? exportCap * dt : 0)) / dt;
+  // Below the floor with "sell when full": tanks stay topped up and only the overflow is sold.
+  const overflow = !selling && s.market.sellMode === 'threshold' && !!s.market.sellWhenFull;
+  const oilRoom = Math.max(0, storageCap - s.storage + (selling || overflow ? exportCap * dt : 0)) / dt;
 
   const pots: { w: Well; fl: WellFlow; gor: number }[] = [];
   for (const w of s.wells) {
@@ -238,7 +240,9 @@ export function computeFlows(s: GameState, dt: number): Flows {
   const sourceWater = injCap - injFromProduced;
 
   // Sales: pipeline first (cheaper), then trucks.
-  const soldVol = selling ? Math.min(exportCap * dt, s.storage + out.oil * dt) : 0;
+  const soldVol = selling
+    ? Math.min(exportCap * dt, s.storage + out.oil * dt)
+    : overflow ? Math.min(exportCap * dt, Math.max(0, s.storage + out.oil * dt - storageCap)) : 0;
   const pipeVol = Math.min(soldVol, cap(s, 'pipeline') * dt);
   const sold = soldVol / dt;
   const soldPipe = pipeVol / dt;

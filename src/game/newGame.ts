@@ -178,7 +178,7 @@ export function newGame(seed = (Math.random() * 2 ** 32) >>> 0): GameState {
     storage: 0,
     market: {
       price: MARKET.startPrice, base: MARKET.startPrice, target: MARKET.startPrice,
-      noise: 0, impact: 0, sellMode: 'auto', threshold: 75,
+      noise: 0, impact: 0, sellMode: 'auto', threshold: 75, sellWhenFull: false,
     },
     exploration,
     history: { day: [], price: [], oil: [], water: [], cash: [], profit: [] },

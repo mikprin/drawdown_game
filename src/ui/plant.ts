@@ -1,4 +1,4 @@
-import { buyFacility, buyTech, setSellMode, setThreshold, techLockReason } from '../game/actions';
+import { buyFacility, buyTech, setSellMode, setSellWhenFull, setThreshold, techLockReason } from '../game/actions';
 import { TECHS } from '../game/balance';
 import { fmtGasNum, fmtMoney, fmtNum, fmtPrice } from '../game/format';
 import { cap, facilityNextValue } from '../game/reservoir';
@@ -25,6 +25,8 @@ export class PlantPanel {
   private modeBtns: Record<SellMode, HTMLButtonElement>;
   private thresh = h('span', { class: 'val' });
   private threshRow: HTMLElement;
+  private whenFull: HTMLInputElement;
+  private whenFullRow: HTMLElement;
   private pnl = h('div', { class: 'pnl' });
   private techRows: { id: TechId; el: HTMLElement; btn: ActionButton }[] = [];
   private storageAside = h('span', { class: 'aside' });
@@ -81,6 +83,8 @@ export class PlantPanel {
     const step = (d: number) =>
       h('button', { class: 'btn small', onclick: () => ctx.act((s) => setThreshold(s, s.market.threshold + d)) }, d > 0 ? `+${d}` : `−${-d}`);
     this.threshRow = h('div', { class: 'stepper' }, step(-5), step(-1), this.thresh, step(1), step(5));
+    this.whenFull = h('input', { type: 'checkbox', onchange: () => ctx.act((s) => setSellWhenFull(s, this.whenFull.checked)) });
+    this.whenFullRow = help(h('label', { class: 'check-row' }, this.whenFull, h('span', null, t('market.sellWhenFull'))), 'sellWhenFull', false);
 
     const liftNote = () => {
       const n = ctx.s.flows.liftLimitedWells;
@@ -117,6 +121,7 @@ export class PlantPanel {
         this.price, help(this.priceSub, 'impact', false),
         h('div', { class: 'seg' }, this.modeBtns.auto, this.modeBtns.threshold, this.modeBtns.hold),
         this.threshRow,
+        this.whenFullRow,
       ),
       h('div', { class: 'section' }, title('pnl.title', 'pnl'), this.pnl),
       h('div', { class: 'section' }, title('tech.title', 'tech'), this.buildTechs()),
@@ -171,6 +176,8 @@ export class PlantPanel {
     for (const mode of Object.keys(this.modeBtns) as SellMode[]) toggleClass(this.modeBtns[mode], 'on', m.sellMode === mode);
     this.threshRow.style.display = m.sellMode === 'threshold' ? '' : 'none';
     setText(this.thresh, t('market.sellAbove', { v: m.threshold }));
+    this.whenFullRow.style.display = this.threshRow.style.display;
+    this.whenFull.checked = !!m.sellWhenFull;
 
     const rows: [string, number, string][] = [[t('pnl.sales'), fl.revenue, 'good']];
     for (const [k, v] of Object.entries(fl.costs) as [CostId, number][]) if (v > 0.5) rows.push([t(`cost.${k}`), -v, '']);
