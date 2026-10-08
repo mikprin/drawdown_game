@@ -161,3 +161,17 @@ export function repairCost(w: Well): number {
 export function marketDepth(s: GameState): number {
   return MARKET.depthLocal + MARKET.depthPipeline[s.facilities.pipeline];
 }
+
+/** Rough daily net contribution of one producing well at current prices and plant costs. */
+export function wellNetPerDay(s: GameState, w: Well): number {
+  const wf = s.flows.wells[w.id];
+  if (!wf || w.status !== 'active' || w.job) return 0;
+  const fl = s.flows;
+  const lift = LIFTS[w.lift];
+  const waterCost = fl.water > 0 ? (fl.costs['Water handling'] ?? 0) / fl.water : ECON.waterTruckPerBbl;
+  const transport = fl.sold > 0 ? (fl.costs['Transport'] ?? 0) / fl.sold : ECON.truckPerBbl;
+  const price = fl.salePrice || s.market.price;
+  const soldShare = fl.gas > 0 ? Math.min(1, cap(s, 'compressor') / fl.gas) : 0;
+  const gasValue = soldShare * ECON.gasPricePerMcf - (1 - soldShare) * ECON.flarePerMcf;
+  return wf.oil * (price - transport) + wf.gas * gasValue - lift.opexDay - wf.liquid * lift.powerPerBbl - wf.water * waterCost;
+}

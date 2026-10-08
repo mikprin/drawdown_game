@@ -276,3 +276,15 @@ export function developField(s: GameState, fieldId: number, dry = false): Result
     addLog(s, `Building pad and flowline to ${f.name}.`);
   });
 }
+
+export function convertToProducer(s: GameState, wellId: number, dry = false): Result {
+  const w = getWell(s, wellId);
+  if (typeof w === 'string') return fail(w);
+  if (w.job) return fail('Well is busy');
+  if (w.status !== 'injector') return fail('Not an injector');
+  return charge(s, ECON.convertCost, dry, () => {
+    w.status = 'active';
+    w.job = { kind: 'lift', daysLeft: ECON.convertDays, total: ECON.convertDays, lift: w.lift };
+    addLog(s, `${w.name} going back on production.`);
+  });
+}

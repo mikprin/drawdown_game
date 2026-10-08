@@ -15,7 +15,7 @@ export const OBJECTIVES: Objective[] = [
   { id: 'sep', text: 'Upgrade the separator', done: (s) => s.facilities.separator >= 1 },
   { id: 'prod100k', text: 'Produce 100k bbl', done: (s) => s.stats.oilProduced >= 100_000 },
   { id: 'explore', text: 'Get an exploration license', done: (s) => s.techs.exploration },
-  { id: 'survey', text: 'Shoot a seismic survey', done: (s) => s.exploration.blocks.some((b) => b > 0) },
+  { id: 'survey', text: 'Shoot a seismic survey', done: (s) => s.exploration.blocks.filter((b) => b > 0).length >= 2 },
   { id: 'discover', text: 'Make a discovery', done: (s) => s.stats.discoveries >= 1 },
   { id: 'develop', text: 'Develop a second field', done: (s) => s.fields.filter((f) => f.developed).length >= 2 },
   { id: 'flood', text: 'Start a waterflood', done: (s) => s.flows.injected > 0 },

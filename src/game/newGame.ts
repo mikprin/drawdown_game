@@ -80,6 +80,8 @@ export function generateMap(h: RngHolder): Exploration {
   }
 
   const blocks = new Array((w / block) * (hgt / block)).fill(0);
+  // The company already holds old 2D seismic over its home block.
+  blocks[Math.floor(hubY / block) * (w / block) + Math.floor(hubX / block)] = 2;
   return { w, h: hgt, hubX, hubY, cells, blocks, surveys: [], wildcat: null };
 }
 
