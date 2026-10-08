@@ -1,0 +1,7 @@
+services:
+  drawdown:
+    build: .
+    image: drawdown:latest
+    ports:
+      - "${PORT:-8080}:80"
+    restart: unless-stopped

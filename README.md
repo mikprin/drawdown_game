@@ -11,6 +11,15 @@ npm test         # simulation tests (vitest)
 npm run build    # typecheck + production bundle in dist/
 ```
 
+## Deploy
+
+```sh
+docker compose up -d --build            # http://<server>:8080
+PORT=80 docker compose up -d --build    # other host port
+```
+
+Multi-stage build: Node runs tests and `vite build`, nginx serves `dist/` (config in `deploy/nginx.conf`). To update: `git pull && docker compose up -d --build`.
+
 ## Layout
 
 - `src/game/` — pure simulation, no DOM. Seeded RNG lives in the state, so runs are deterministic.
