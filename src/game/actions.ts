@@ -75,6 +75,7 @@ export function buyTech(s: GameState, id: TechId, dry = false): Result {
     if (id === 'offshore' && !s.shelf) {
       s.shelf = generateShelf(s);
       s.weather = newWeather();
+      addLog(s, msg('log.shelfOpened'), 'good');
     }
     addLog(s, msg('log.unlocked', { tech: techName(id) }), 'good');
   });

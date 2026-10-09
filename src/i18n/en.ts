@@ -393,6 +393,7 @@ export const en = {
   'log.stormOver': 'The storm has passed. Work at sea resumes.',
   'log.platformOrdered': 'Jack-up ordered for {field}: towing out and jacking up the hull.',
   'log.platformOnStream': '{field} platform on stream. The discovery well is flowing; the first tanker is on its way.',
+  'log.shelfOpened': 'Shelf map unlocked: open the Map and pick Shelf above it.',
   'log.cargoSold': '{field}: tanker cargo of {bbl:bbl} sold for {cash:money}.',
   'log.shelfCrew': 'Seismic vessel ({kind}D) sails for the survey block.',
   'log.shelfSeismicDone': 'Marine {kind}D seismic processed: {leads:plural:# lead|# leads} mapped.',

@@ -10,7 +10,7 @@ import { installCost, platformOfField } from '../game/platform';
 import { reserveEstimate } from '../game/reservoir';
 import type { Field, GameState, MapId } from '../game/types';
 import { t, type HelpId, type MsgKey } from '../i18n';
-import { ActionButton, bar, h, setBar, setText, toggleClass } from './dom';
+import { ActionButton, bar, h, setBar, setText } from './dom';
 import type { Ctx } from './ctx';
 import { help, term } from './help';
 
@@ -27,8 +27,6 @@ function mapFields(s: GameState, map: MapId): Field[] {
 
 export class ExplorePanel {
   readonly el = h('div');
-  private mapSwitch: HTMLElement;
-  private mapBtns: Record<MapId, HTMLButtonElement>;
   private license: HTMLElement;
   private licenseBtn: ActionButton;
   private cellBox = h('div');
@@ -41,9 +39,6 @@ export class ExplorePanel {
   private findsKey = '';
 
   constructor(private ctx: Ctx) {
-    const mapBtn = (m: MapId, key: MsgKey) => h('button', { class: 'btn small', onclick: () => ctx.setMap(m) }, t(key));
-    this.mapBtns = { land: mapBtn('land', 'ex.mapLand'), shelf: mapBtn('shelf', 'ex.mapShelf') };
-    this.mapSwitch = h('div', { class: 'section' }, h('div', { class: 'seg' }, this.mapBtns.land, this.mapBtns.shelf));
     this.licenseBtn = new ActionButton(t('ex.buyLicense'), () => buyTech(ctx.s, 'exploration', true), () => ctx.act((s) => buyTech(s, 'exploration')),
       { cls: 'primary block', help: () => ({ title: t('tech.exploration.name'), body: t('tech.exploration.desc') }) });
     this.license = h('div', { class: 'section' },
@@ -52,7 +47,6 @@ export class ExplorePanel {
         h('p', { class: 'muted' }, t('ex.noLicenseText')),
         this.licenseBtn.el));
     this.el.append(
-      this.mapSwitch,
       this.license,
       h('div', { class: 'section' }, h('div', { class: 'section-title' }, t('ex.cell')), this.cellBox),
       h('div', { class: 'section' }, h('div', { class: 'section-title' }, t('ex.ops')), this.ops),
@@ -67,8 +61,6 @@ export class ExplorePanel {
 
   update(): void {
     const s = this.ctx.s;
-    this.mapSwitch.style.display = s.shelf ? '' : 'none';
-    for (const m of ['land', 'shelf'] as const) toggleClass(this.mapBtns[m], 'on', this.map === m);
     this.license.style.display = s.techs.exploration ? 'none' : '';
     this.licenseBtn.update();
     this.updateCell(s);

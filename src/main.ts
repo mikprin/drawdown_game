@@ -60,6 +60,7 @@ async function main(): Promise<void> {
     },
     setView(v: ViewMode) {
       if (v === 'sea' && !s.platforms.length) return;
+      $('tooltip').hidden = true;
       ui.view = v;
       if (v === 'sea' && !s.platforms.some((p) => p.id === ui.platform)) ui.platform = s.platforms[0].id;
       stage.setMode(v);
@@ -89,6 +90,7 @@ async function main(): Promise<void> {
       refresh();
     },
     setMap(m) {
+      $('tooltip').hidden = true;
       if (m === ui.map) return;
       ui.map = m;
       ui.cell = null;
@@ -139,12 +141,13 @@ async function main(): Promise<void> {
   const helpCard = new HelpCard($('help'));
   let top: TopBar, ops: OpsPanel, explore: ExplorePanel, plant: PlantPanel, bottom: BottomBar;
   let siteTab: HTMLButtonElement, seaTab: HTMLButtonElement, mapTab: HTMLButtonElement, hint: HTMLDivElement;
+  let mapSwitch: HTMLDivElement, landBtn: HTMLButtonElement, shelfBtn: HTMLButtonElement;
 
   /** Build every DOM panel from scratch. Panels read strings once, so a language switch rebuilds them. */
   function mountUi(): void {
     helpCard.hide();
     for (const id of ['topbar', 'left', 'right', 'bottom']) $(id).replaceChildren();
-    view.querySelectorAll('.view-tabs, .view-hint').forEach((el) => el.remove());
+    view.querySelectorAll('.view-tabs, .view-subtabs, .view-hint').forEach((el) => el.remove());
     top = new TopBar($('topbar'), ctx);
     ops = new OpsPanel(ctx);
     explore = new ExplorePanel(ctx);
@@ -156,7 +159,11 @@ async function main(): Promise<void> {
     seaTab = h('button', { class: 'btn', onclick: () => ctx.setView('sea') }, t('view.sea'));
     mapTab = h('button', { class: 'btn', onclick: () => ctx.setView('map') }, t('view.map'));
     hint = h('div', { class: 'view-hint' });
-    view.append(h('div', { class: 'view-tabs' }, siteTab, seaTab, mapTab), hint);
+    // Which map: right under the view tabs, where players look for it.
+    landBtn = h('button', { class: 'btn small', onclick: () => ctx.setMap('land') }, t('ex.mapLand'));
+    shelfBtn = h('button', { class: 'btn small', onclick: () => ctx.setMap('shelf') }, t('ex.mapShelf'));
+    mapSwitch = h('div', { class: 'view-subtabs' }, landBtn, shelfBtn);
+    view.append(h('div', { class: 'view-tabs' }, siteTab, seaTab, mapTab), mapSwitch, hint);
   }
   mountUi();
 
@@ -195,6 +202,9 @@ async function main(): Promise<void> {
     toggleClass(siteTab, 'on', ui.view === 'site');
     toggleClass(seaTab, 'on', ui.view === 'sea');
     toggleClass(mapTab, 'on', ui.view === 'map');
+    mapSwitch.style.display = ui.view === 'map' && s.shelf ? '' : 'none';
+    toggleClass(landBtn, 'on', ui.map !== 'shelf' || !s.shelf);
+    toggleClass(shelfBtn, 'on', ui.map === 'shelf' && !!s.shelf);
     // Tabs carry the alarms of scenes you are not looking at: red = a plant is choking wells, blue = storm at sea.
     seaTab.style.display = s.platforms.length ? '' : 'none';
     toggleClass(siteTab, 'alert', s.flows.bottleneck !== 'none');

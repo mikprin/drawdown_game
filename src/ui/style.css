@@ -332,6 +332,14 @@ button { font: inherit; color: inherit; }
 .view-tabs .btn:first-child { border-radius: 3px 0 0 3px; }
 .view-tabs .btn:last-child { border-radius: 0 3px 3px 0; }
 
+.view-subtabs {
+  position: absolute; top: 46px; left: 50%; transform: translateX(-50%); z-index: 3;
+  display: flex; box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+}
+.view-subtabs .btn { border-radius: 0; min-width: 90px; justify-content: center; }
+.view-subtabs .btn:first-child { border-radius: 0 0 0 3px; }
+.view-subtabs .btn:last-child { border-radius: 0 0 3px 0; }
+
 .view-hint {
   position: absolute; bottom: 10px; left: 12px; z-index: 3; color: var(--faint); font-size: 11px; pointer-events: none;
   text-shadow: 0 1px 2px #000;
