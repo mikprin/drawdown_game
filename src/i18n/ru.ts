@@ -57,6 +57,8 @@ export const ru: Record<MsgKey, string> = {
   'top.pause': 'Пауза (пробел)',
   'menu.title': 'Меню',
   'menu.save': 'Сохранить игру',
+  'menu.export': 'Сохранить в файл',
+  'menu.import': 'Загрузить из файла…',
   'menu.new': 'Новая игра…',
   'menu.lang': 'Язык',
   'menu.music': 'Музыка',
@@ -65,6 +67,11 @@ export const ru: Record<MsgKey, string> = {
   'top.newTitle': 'Новая игра',
   'top.newText': 'Бросить эту компанию и начать заново с одной усталой качалкой?',
   'top.newOk': 'Начать заново',
+  'top.importTitle': 'Загрузка из файла',
+  'top.importText': 'Заменить эту компанию сохранённой на {date}? Текущий прогресс пропадёт, если не сохранить его в файл.',
+  'top.importOk': 'Загрузить',
+  'top.importBad': 'Этот файл не является сохранением этой версии игры.',
+  'top.importClose': 'OK',
 
   // ---------- log ----------
   'log.raw': '{text}',

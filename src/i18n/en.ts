@@ -59,6 +59,8 @@ export const en = {
   'top.pause': 'Pause (Space)',
   'menu.title': 'Menu',
   'menu.save': 'Save game',
+  'menu.export': 'Save to file',
+  'menu.import': 'Load from file…',
   'menu.new': 'New game…',
   'menu.lang': 'Language',
   'menu.music': 'Music',
@@ -67,6 +69,11 @@ export const en = {
   'top.newTitle': 'New game',
   'top.newText': 'Abandon this company and start over with one tired pumpjack?',
   'top.newOk': 'Start over',
+  'top.importTitle': 'Load from file',
+  'top.importText': 'Replace this company with the one saved on {date}? Current progress is lost unless you saved it to a file.',
+  'top.importOk': 'Load',
+  'top.importBad': 'This file is not a save from this version of the game.',
+  'top.importClose': 'OK',
 
   // ---------- log ----------
   'log.raw': '{text}',

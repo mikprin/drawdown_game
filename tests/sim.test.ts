@@ -176,6 +176,13 @@ describe('persistence', () => {
     expect(t.log[0]).toEqual({ day: 3, kind: 'good', msg: { key: 'log.raw', params: { text: 'Barrow-2 is drilled and on production.' } } });
   });
 
+  it('rejects files that are not saves', () => {
+    expect(deserialize('not json')).toBeNull();
+    expect(deserialize('42')).toBeNull();
+    expect(deserialize(JSON.stringify({ version: SAVE_VERSION }))).toBeNull();
+    expect(deserialize(JSON.stringify({ ...JSON.parse(serialize(newGame(5))), version: SAVE_VERSION + 1 }))).toBeNull();
+  });
+
   it('caps offline progress', () => {
     const s = newGame(5);
     const r = simulateOffline(s, 10 * 24 * 3600)!;

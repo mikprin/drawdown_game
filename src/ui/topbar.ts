@@ -4,7 +4,8 @@ import { getLang, LANGS, t, type HelpId, type Lang, type MsgKey } from '../i18n'
 import { h, setText, toggleClass } from './dom';
 import type { Ctx } from './ctx';
 import { help } from './help';
-import { confirmModal } from './modal';
+import { confirmModal, modal } from './modal';
+import { deserialize } from '../game/save';
 import { sparkline } from './charts';
 
 // Languages are listed by their own names, as on most sites.
@@ -13,6 +14,22 @@ const LANG_NAMES: Record<Lang, string> = { en: 'English', ru: 'Русский' }
 const GEAR_SVG = '<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">' +
   '<circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="3.2" stroke-dasharray="3.1 3.18"/>' +
   '<circle cx="12" cy="12" r="5.6" fill="none" stroke="currentColor" stroke-width="2.6"/></svg>';
+
+/** Pick a save file, check it, and confirm before it replaces the running game. */
+function importSave(ctx: Ctx): void {
+  const input = h('input', { type: 'file', accept: '.json,application/json' }) as HTMLInputElement;
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const state = deserialize(await file.text());
+    if (!state) {
+      modal(t('top.importTitle'), t('top.importBad'), [{ label: t('top.importClose') }]);
+      return;
+    }
+    confirmModal(t('top.importTitle'), t('top.importText', { date: fmtDate(state.day) }), t('top.importOk'), () => ctx.loadState(state));
+  });
+  input.click();
+}
 
 /** Gear button with a dropdown: save, new game, language, music. Keeps rarely used actions out of the top bar. */
 function settingsMenu(ctx: Ctx): HTMLElement {
@@ -39,6 +56,8 @@ function settingsMenu(ctx: Ctx): HTMLElement {
     h('button', { class: `item ${cls}`, role: 'menuitem', onclick: () => { close(); onPick(); } }, label);
   list.append(
     item(t('menu.save'), () => ctx.save()),
+    item(t('menu.export'), () => ctx.exportSave()),
+    item(t('menu.import'), () => importSave(ctx)),
     item(t('menu.new'), () => confirmModal(t('top.newTitle'), t('top.newText'), t('top.newOk'), () => ctx.newGame())),
     h('div', { class: 'sep' }),
     h('div', { class: 'head' }, t('menu.lang')),

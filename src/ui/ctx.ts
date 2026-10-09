@@ -30,6 +30,10 @@ export interface Ctx {
   setSpeed(v: number): void;
   newGame(): void;
   save(): void;
+  /** Download the current game as a file. */
+  exportSave(): void;
+  /** Replace the current game with one read from a file, then restart. */
+  loadState(state: GameState): void;
   /** Switch UI language and rebuild the panels. */
   setLang(lang: Lang): void;
 }

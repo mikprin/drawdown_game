@@ -7,7 +7,7 @@ import { msg } from './game/msg';
 import { newGame } from './game/newGame';
 import { platformOfField } from './game/platform';
 import { reserveEstimate, wellById } from './game/reservoir';
-import { clearSave, loadGame, saveGame, simulateOffline, type OfflineReport } from './game/save';
+import { clearSave, downloadSave, loadGame, saveGame, simulateOffline, type OfflineReport } from './game/save';
 import { step } from './game/sim';
 import type { GameState } from './game/types';
 import { getLang, setLang, t } from './i18n';
@@ -130,6 +130,16 @@ async function main(): Promise<void> {
       persist();
       s.log.unshift({ day: s.day, msg: msg('log.saved'), kind: 'info' });
       refresh();
+    },
+    exportSave() {
+      persist();
+      downloadSave(s);
+    },
+    loadState(state) {
+      // Stamped as saved now, so the reload doesn't replay the time since the file was made.
+      saveGame(state);
+      resetting = true;
+      location.reload();
     },
     setLang(lang) {
       if (lang === getLang()) return;

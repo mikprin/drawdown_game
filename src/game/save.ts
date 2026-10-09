@@ -15,6 +15,8 @@ export function deserialize(json: string): GameState | null {
   try {
     const data = migrate(JSON.parse(json));
     if (!data || data.version !== SAVE_VERSION) return null;
+    // Files can come from anywhere; reject JSON that isn't shaped like a save.
+    if (typeof data.cash !== 'number' || typeof data.day !== 'number' || !Array.isArray(data.fields) || !Array.isArray(data.log)) return null;
     data.flows = emptyFlows();
     return data;
   } catch {
@@ -63,6 +65,16 @@ export function loadGame(): GameState | null {
   } catch {
     return null;
   }
+}
+
+/** Hand the save to the player as a .json file, so it can move to another browser. */
+export function downloadSave(s: GameState): void {
+  const url = URL.createObjectURL(new Blob([serialize(s)], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `drawdown-day${Math.floor(s.day)}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 export function clearSave(): void {
