@@ -1,4 +1,4 @@
-import type { FacilityId, LiftType, TechId } from './types';
+import type { FacilityId, LiftType, ModuleId, TechId } from './types';
 
 /** All tunable numbers live here. Rates are per game day. */
 
@@ -181,9 +181,8 @@ export const TECHS: Record<TechId, TechDef> = {
     requires: ['wellPad'],
   },
   offshore: {
-    cost: 60_000_000,
+    cost: 15_000_000,
     requires: ['exploration', 'waterflood'],
-    comingSoon: true,
   },
 };
 
@@ -275,4 +274,146 @@ export const EXPLORATION = {
   maxFields: 5,
   noise2d: 0.18,
   noise3d: 0.06,
+};
+
+/** Layer 2: the continental shelf. Everything costs several times more than onshore. */
+export const OFFSHORE = {
+  maxPlatforms: 3,
+  installBase: 20_000_000,
+  installPerCell: 350_000,
+  installDays: 60,
+  /** Taller legs for deeper water, by shelf terrain (5 shallow, 6 mid, 7 outer). */
+  depthMult: { 5: 1, 6: 1.25, 7: 1.6 } as Record<number, number>,
+  decomBase: 5_000_000,
+  decomPerWell: 1_200_000,
+  decomDays: 40,
+  /** Crew rotation, helicopters and supply boats, $/d per platform. */
+  logisticsDay: 35_000,
+
+  drillCost: 4_000_000,
+  drillDays: 30,
+  /** Bigger completions: every lift moves this many times more liquid offshore. */
+  liftCapMult: 4,
+  liftCostMult: 4,
+  wellOpexMult: 4,
+  fracCostMult: 6,
+  serviceMult: 4,
+  repairMult: 5,
+  convertCost: 900_000,
+  plugCost: 1_500_000,
+  shutinOpexDay: 150,
+  injectorOpexDay: 400,
+
+  /** Hotel and process load, $/d of diesel. Lift power uses the onshore $/bbl times powerMult. */
+  basePowerDay: 12_000,
+  powerMult: 1.5,
+  injPowerPerBbl: 0.1,
+  /** Diesel displaced by burning one mcf of associated gas in the turbines. */
+  fuelValuePerMcf: 7,
+  flarePerMcf: 4,
+  gasInjPerMcf: 0.25,
+  overboardPerBbl: 0.6,
+  injectionPerBbl: 0.3,
+  seawaterPerBbl: 0.05,
+  injectivity: 6000,
+
+  tankerCargo: 60_000,
+  tankerCharterDay: 14_000,
+  tankerMobilise: 1_500_000,
+  tankerMax: 4,
+  loadRate: 40_000,
+  /** One-way sailing time to the export port: base + per shelf cell from the shore base. */
+  legBase: 4,
+  legPerCell: 0.35,
+  /** A tanker leaves part-loaded after this long at the buoy. */
+  maxMooredDays: 12,
+  marketDepth: 3_000_000,
+  revenueEmaDays: 30,
+
+  stormGap: [50, 140] as [number, number],
+  stormDays: [3, 8] as [number, number],
+  stormWarnDays: 5,
+};
+
+export interface ModuleLevel {
+  /** Capacity: slots, bbl/d, bbl or mcf/d depending on the module. */
+  value: number;
+  /** Deck area this level occupies in total. */
+  area: number;
+  cost: number;
+  opexDay: number;
+}
+
+export const DECK: { area: number; cost: number; opexDay: number }[] = [
+  { area: 14, cost: 0, opexDay: 0 },
+  { area: 20, cost: 9_000_000, opexDay: 2000 },
+  { area: 28, cost: 24_000_000, opexDay: 4500 },
+];
+
+export const MODULES: Record<ModuleId, { levels: ModuleLevel[]; requiresTech?: TechId }> = {
+  wellbay: {
+    levels: [
+      { value: 3, area: 3, cost: 0, opexDay: 0 },
+      { value: 6, area: 6, cost: 5_000_000, opexDay: 500 },
+      { value: 9, area: 9, cost: 9_000_000, opexDay: 1000 },
+      { value: 12, area: 12, cost: 14_000_000, opexDay: 1500 },
+    ],
+  },
+  separator: {
+    levels: [
+      { value: 8000, area: 2, cost: 0, opexDay: 2000 },
+      { value: 18_000, area: 3, cost: 6_000_000, opexDay: 4000 },
+      { value: 35_000, area: 5, cost: 15_000_000, opexDay: 7000 },
+    ],
+  },
+  storage: {
+    levels: [
+      { value: 20_000, area: 2, cost: 0, opexDay: 500 },
+      { value: 50_000, area: 4, cost: 5_000_000, opexDay: 1200 },
+      { value: 110_000, area: 6, cost: 13_000_000, opexDay: 2500 },
+    ],
+  },
+  waterTreat: {
+    levels: [
+      { value: 4000, area: 1, cost: 0, opexDay: 800 },
+      { value: 12_000, area: 2, cost: 4_000_000, opexDay: 1800 },
+      { value: 30_000, area: 3, cost: 10_000_000, opexDay: 3500 },
+    ],
+  },
+  injection: {
+    requiresTech: 'waterflood',
+    levels: [
+      { value: 0, area: 0, cost: 0, opexDay: 0 },
+      { value: 10_000, area: 2, cost: 6_000_000, opexDay: 2500 },
+      { value: 25_000, area: 3, cost: 14_000_000, opexDay: 5000 },
+    ],
+  },
+  turbine: {
+    levels: [
+      { value: 0, area: 0, cost: 0, opexDay: 0 },
+      { value: 2500, area: 2, cost: 5_000_000, opexDay: 1500 },
+      { value: 7000, area: 3, cost: 12_000_000, opexDay: 3000 },
+    ],
+  },
+  gasInj: {
+    levels: [
+      { value: 0, area: 0, cost: 0, opexDay: 0 },
+      { value: 4000, area: 2, cost: 7_000_000, opexDay: 2000 },
+      { value: 12_000, area: 3, cost: 16_000_000, opexDay: 4000 },
+    ],
+  },
+};
+
+export const SHELF = {
+  w: 24,
+  h: 16,
+  block: 4,
+  survey2dCost: 1_200_000,
+  survey2dDays: 20,
+  survey3dCost: 3_500_000,
+  survey3dDays: 35,
+  wildcatCost: 9_000_000,
+  wildcatDays: 40,
+  /** Indexed by terrain code; land codes are unused here. */
+  terrainCostMult: [1, 1, 1, Infinity, Infinity, 1, 1.25, 1.6, Infinity],
 };

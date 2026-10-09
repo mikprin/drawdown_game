@@ -22,6 +22,9 @@ export type TechId =
   | 'maintCrew'
   | 'offshore';
 
+/** Platform deck modules. Each level takes deck area. */
+export type ModuleId = 'wellbay' | 'separator' | 'storage' | 'waterTreat' | 'injection' | 'turbine' | 'gasInj';
+
 export type SellMode = 'auto' | 'hold' | 'threshold';
 
 /** active = on production (unless a job is running); injector = water injection well. */
@@ -90,6 +93,10 @@ export interface Field {
   padIndex: number;
   /** Depth/complexity multiplier on well costs. */
   costMult: number;
+  /** Shelf field: produced through a platform, cells refer to the shelf map. */
+  offshore?: boolean;
+  /** Platform decommissioned; the field is closed for good. */
+  abandoned?: boolean;
 }
 
 export interface Lead {
@@ -110,8 +117,13 @@ export interface Lead {
 
 export type DrillResult = 'none' | 'dry' | 'discovery';
 
+export type MapId = 'land' | 'shelf';
+
 export interface Cell {
-  /** 0 plain, 1 hills, 2 marsh, 3 lake (undrillable). */
+  /**
+   * Land map: 0 plain, 1 hills, 2 marsh, 3 lake (undrillable).
+   * Shelf map: 4 coast (undrillable), 5 shallow, 6 mid shelf, 7 outer shelf, 8 slope (too deep for a jack-up).
+   */
   terrain: number;
   /** Hidden regional hydrocarbon prior 0..1. */
   prior: number;
@@ -148,6 +160,44 @@ export interface Exploration {
   wildcat: Wildcat | null;
 }
 
+export type TankerState = 'queued' | 'moored' | 'outbound' | 'port' | 'inbound';
+
+/**
+ * Shuttle tanker on charter. Cycle: queued at anchor → moored and loading →
+ * outbound to port → port (sells the cargo, or waits for the price) → inbound.
+ */
+export interface Tanker {
+  state: TankerState;
+  /** Days left on the current leg (outbound / inbound). */
+  daysLeft: number;
+  cargo: number;
+  /** Days spent moored on this call. */
+  moored: number;
+}
+
+export interface Platform {
+  id: number;
+  fieldId: number;
+  /** Deck level: total deck area shared by the well bay and the modules. */
+  deck: number;
+  modules: Record<ModuleId, number>;
+  /** Oil in the platform tanks, bbl. */
+  storage: number;
+  tankers: Tanker[];
+  /** Tanker sales smoothed into a per-day figure for the P&L (cargo revenue is lumpy). */
+  revenueEma: number;
+  /** Decommissioning under way; the platform disappears when it ends. */
+  decom: { daysLeft: number; total: number } | null;
+}
+
+export interface Weather {
+  /** Days until the next storm while calm. */
+  next: number;
+  /** Days left of the current storm; 0 when calm. */
+  storm: number;
+  warned: boolean;
+}
+
 export interface Market {
   price: number;
   base: number;
@@ -177,7 +227,9 @@ export interface LogEntry {
   kind: LogKind;
 }
 
-export type CostId = 'wellOpex' | 'liftPower' | 'facilities' | 'water' | 'transport' | 'flaring' | 'wages';
+export type CostId =
+  | 'wellOpex' | 'liftPower' | 'facilities' | 'water' | 'transport' | 'flaring' | 'wages'
+  | 'logistics' | 'charter' | 'diesel';
 
 export type Bottleneck = 'none' | 'separator' | 'water' | 'storage';
 
@@ -193,8 +245,46 @@ export interface WellFlow {
   inj: number;
 }
 
-/** Per-day rates from the last simulation step, for UI and rendering. */
+/** Per-day rates of one platform from the last step. */
+export interface PlatformFlows {
+  liquidPotential: number;
+  liquid: number;
+  oil: number;
+  water: number;
+  gas: number;
+  choke: number;
+  bottleneck: Bottleneck;
+  liftLimitedWells: number;
+  sepCap: number;
+  waterCap: number;
+  storageCap: number;
+  /** Oil pumped into a moored tanker. */
+  loaded: number;
+  injCap: number;
+  injected: number;
+  injFromProduced: number;
+  overboard: number;
+  waterTreatCap: number;
+  /** Power the platform needs, in $/d of diesel. */
+  powerDemand: number;
+  gasFuel: number;
+  turbineCap: number;
+  gasInjected: number;
+  gasInjCap: number;
+  gasFlared: number;
+  revenue: number;
+  costs: Partial<Record<CostId, number>>;
+  costTotal: number;
+  profit: number;
+}
+
+/**
+ * Per-day rates from the last simulation step, for UI and rendering. The
+ * top-level numbers are the onshore hub; platforms are in `platforms`, and
+ * `total` sums everything.
+ */
 export interface Flows {
+  /** Every well, onshore and offshore. */
   wells: Record<number, WellFlow>;
   liquidPotential: number;
   liquid: number;
@@ -222,6 +312,8 @@ export interface Flows {
   costs: Partial<Record<CostId, number>>;
   costTotal: number;
   profit: number;
+  platforms: Record<number, PlatformFlows>;
+  total: { oil: number; water: number; liquid: number; profit: number };
 }
 
 export interface Stats {
@@ -231,6 +323,7 @@ export interface Stats {
   wellsDrilled: number;
   wildcats: number;
   discoveries: number;
+  cargoes: number;
 }
 
 export interface GameState {
@@ -246,6 +339,10 @@ export interface GameState {
   storage: number;
   market: Market;
   exploration: Exploration;
+  /** Shelf exploration map, created with the shelf license. */
+  shelf: Exploration | null;
+  platforms: Platform[];
+  weather: Weather;
   history: History;
   log: LogEntry[];
   stats: Stats;

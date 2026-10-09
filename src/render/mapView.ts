@@ -1,26 +1,31 @@
 import { Container, Graphics, Rectangle, Sprite, Text } from 'pixi.js';
 import { EXPLORATION } from '../game/balance';
 import {
-  blockOf, cellAt, cosEstimate, heatEstimate, leadSizeEstimate, leadVisible, regionalHint,
+  blockOf, cellAt, cosEstimate, heatEstimate, leadSizeEstimate, leadVisible, mapOf, regionalHint,
 } from '../game/explore';
 import { fmtNum } from '../game/format';
-import type { GameState } from '../game/types';
+import type { Exploration, GameState, MapId } from '../game/types';
 import { getLang, t as tr } from '../i18n';
 import { fbm, vnoise } from './noise';
 import { bake, baker, spriteOf } from './paint';
 
 export const CELL = 40;
 
+/** Land: plain, hills, marsh, lake. Shelf: coast, shallow, mid shelf, outer shelf, slope. */
 const TERRAIN_COL = [
   [104, 92, 62],
   [122, 104, 74],
   [70, 84, 58],
   [44, 66, 78],
+  [112, 100, 70],
+  [58, 104, 112],
+  [42, 84, 100],
+  [32, 64, 84],
+  [20, 40, 58],
 ];
-const TERRAIN_H = [0.42, 0.85, 0.25, 0.05];
+const TERRAIN_H = [0.42, 0.85, 0.25, 0.05, 0.7, 0.3, 0.2, 0.1, 0.0];
 
-function bakeTerrain(s: GameState): Sprite {
-  const ex = s.exploration;
+function bakeTerrain(ex: Exploration): Sprite {
   const W = ex.w * CELL, H = ex.h * CELL;
   const b = baker(W, H, 0, 0, 1);
   const img = b.ctx.createImageData(W, H);
@@ -43,9 +48,12 @@ function bakeTerrain(s: GameState): Sprite {
       const ey2 = hAt(fx, fy + 0.05) * 0.75 + fbm(px * 0.012, (py + 2) * 0.012, 21, 4) * 0.35;
       let k = 0.9 + (e - ex2) * 6 + (e - ey2) * 6;
       k += (vnoise(px * 0.6, py * 0.6, 4) - 0.5) * 0.1;
-      // Contour lines.
+      // Contour lines on land; at sea, faint isobaths and a light ripple.
       const c = (e * 14) % 1;
-      if (c < 0.06 && t !== 3) k *= 0.72;
+      if (t >= 5) {
+        if (c < 0.04) k *= 1.12;
+        k += (vnoise(px * 0.15, py * 0.5, 9) - 0.5) * 0.08;
+      } else if (c < 0.06 && t !== 3) k *= 0.72;
       const i = (py * W + px) * 4;
       img.data[i] = col[0] * k;
       img.data[i + 1] = col[1] * k;
@@ -96,6 +104,7 @@ export class MapView {
   selected: { x: number; y: number } | null = null;
 
   private terrain: Sprite | null = null;
+  private mapId: MapId | null = null;
   private heat = new Graphics();
   private fogLayer = new Container();
   private marks = new Graphics();
@@ -140,25 +149,36 @@ export class MapView {
     return [this.w * CELL, this.h * CELL];
   }
 
-  sync(s: GameState): void {
-    const ex = s.exploration;
-    if (!this.terrain) {
-      this.w = ex.w;
-      this.h = ex.h;
-      this.terrain = bakeTerrain(s);
-      this.root.addChildAt(this.terrain, 0);
-      this.root.hitArea = new Rectangle(0, 0, ex.w * CELL, ex.h * CELL);
-      this.fogTex = bakeFog();
-    }
-    const key = getLang() + ex.blocks.join('') + '|' + ex.cells.map((c) => c.drilled[0] + c.fieldId).join('') +
-      '|' + s.fields.map((f) => `${f.id}${f.developed ? 1 : 0}${f.devJob ? 1 : 0}`).join(',');
-    if (key === this.staticKey) return;
-    this.staticKey = key;
-    this.drawStatic(s);
+  /** Which map is on screen; `sync` swaps the baked terrain when it changes. */
+  get map(): MapId {
+    return this.mapId ?? 'land';
   }
 
-  private drawStatic(s: GameState): void {
-    const ex = s.exploration;
+  sync(s: GameState, map: MapId): void {
+    if (map === 'shelf' && !s.shelf) map = 'land';
+    const ex = mapOf(s, map);
+    if (this.mapId !== map) {
+      this.mapId = map;
+      if (this.terrain) {
+        this.terrain.texture.destroy(true);
+        this.terrain.destroy();
+      }
+      this.w = ex.w;
+      this.h = ex.h;
+      this.terrain = bakeTerrain(ex);
+      this.root.addChildAt(this.terrain, 0);
+      this.root.hitArea = new Rectangle(0, 0, ex.w * CELL, ex.h * CELL);
+      this.fogTex ??= bakeFog();
+      this.staticKey = '';
+    }
+    const key = getLang() + map + ex.blocks.join('') + '|' + ex.cells.map((c) => c.drilled[0] + c.fieldId).join('') +
+      '|' + s.fields.map((f) => `${f.id}${f.developed ? 1 : 0}${f.devJob ? 1 : 0}${f.abandoned ? 1 : 0}`).join(',');
+    if (key === this.staticKey) return;
+    this.staticKey = key;
+    this.drawStatic(s, ex, map);
+  }
+
+  private drawStatic(s: GameState, ex: Exploration, map: MapId): void {
     const B = EXPLORATION.block;
     // Fog per unsurveyed block, tinted by the faint regional hint.
     for (const f of this.fogSprites) f.destroy();
@@ -166,13 +186,15 @@ export class MapView {
     for (let blk = 0; blk < ex.blocks.length; blk++) {
       if (ex.blocks[blk] > 0) continue;
       const sp = new Sprite(this.fogTex!.texture);
+      // Sea charts show the water depth; only the geology is fogged on the shelf.
+      if (map === 'shelf') sp.alpha = 0.55;
       const bw = ex.w / B;
       sp.position.set((blk % bw) * B * CELL, Math.floor(blk / bw) * B * CELL);
       this.fogLayer.addChild(sp);
       this.fogSprites.push(sp);
       // Faint regional prior glowing through the fog.
       const hint = new Graphics();
-      hint.rect(0, 0, B * CELL, B * CELL).fill({ color: 0xe8a23a, alpha: Math.min(0.22, regionalHint(s, blk) * 0.45) });
+      hint.rect(0, 0, B * CELL, B * CELL).fill({ color: 0xe8a23a, alpha: Math.min(0.22, regionalHint(ex, blk) * 0.45) });
       hint.position.copyFrom(sp.position);
       this.fogLayer.addChild(hint);
       this.fogSprites.push(hint);
@@ -182,8 +204,9 @@ export class MapView {
     h.clear();
     for (let y = 0; y < ex.h; y++) {
       for (let x = 0; x < ex.w; x++) {
-        const v = heatEstimate(s, x, y);
-        if (v === null || cellAt(s, x, y).terrain === 3) continue;
+        const v = heatEstimate(ex, x, y);
+        const tr0 = cellAt(ex, x, y).terrain;
+        if (v === null || tr0 === 3 || tr0 === 4) continue;
         h.rect(x * CELL, y * CELL, CELL, CELL).fill({ color: heatColor(v), alpha: 0.12 + Math.min(0.5, v * 0.9) });
       }
     }
@@ -206,15 +229,24 @@ export class MapView {
 
     const m = this.marks;
     m.clear();
-    // Hub.
+    // Hub, or the shore base on the shelf map.
     const hx = ex.hubX * CELL + CELL / 2, hy = ex.hubY * CELL + CELL / 2;
     m.rect(hx - 12, hy - 12, 24, 24).fill({ color: 0x2a2620 }).stroke({ width: 2, color: 0xe8a23a });
     m.rect(hx - 6, hy - 6, 12, 12).fill({ color: 0xe8a23a });
-    label(tr('map.hub'), hx, hy + 13, 0xe8a23a);
+    label(tr(map === 'shelf' ? 'map.base' : 'map.hub'), hx, hy + 13, 0xe8a23a);
+    if (map === 'shelf') {
+      // Slope cells are out of a jack-up's reach: hatch them.
+      for (let y = 0; y < ex.h; y++)
+        for (let x = 0; x < ex.w; x++) {
+          if (cellAt(ex, x, y).terrain !== 8) continue;
+          for (let k = 0; k < CELL; k += 8) m.moveTo(x * CELL + k, y * CELL).lineTo(x * CELL, y * CELL + k);
+        }
+      m.stroke({ width: 1, color: 0x9ab8c8, alpha: 0.12 });
+    }
 
     for (let y = 0; y < ex.h; y++) {
       for (let x = 0; x < ex.w; x++) {
-        const c = cellAt(s, x, y);
+        const c = cellAt(ex, x, y);
         const cx = x * CELL + CELL / 2, cy = y * CELL + CELL / 2;
         if (c.drilled === 'dry') {
           m.moveTo(cx - 7, cy - 7).lineTo(cx + 7, cy + 7).moveTo(cx + 7, cy - 7).lineTo(cx - 7, cy + 7)
@@ -225,6 +257,21 @@ export class MapView {
         }
         if (c.fieldId > 0) {
           const f = s.fields.find((ff) => ff.id === c.fieldId)!;
+          if (f.abandoned) {
+            m.circle(cx, cy, 9).fill({ color: 0x1a1612 }).stroke({ width: 2, color: 0x8a8070 });
+            m.moveTo(cx - 5, cy).lineTo(cx + 5, cy).stroke({ width: 2, color: 0x8a8070 });
+            label(f.name, cx, cy + 11, 0x9a8f80, 10);
+            continue;
+          }
+          if (f.offshore && (f.developed || f.devJob)) {
+            // Platform: deck on four legs.
+            const col = f.developed ? 0x8fbf5a : 0xe8a23a;
+            m.rect(cx - 10, cy - 8, 20, 9).fill({ color: 0x1a1612 }).stroke({ width: 2, color: col });
+            for (const lx of [-8, 8]) m.moveTo(cx + lx, cy + 1).lineTo(cx + lx, cy + 10).stroke({ width: 2, color: col });
+            m.moveTo(cx + 2, cy - 8).lineTo(cx + 2, cy - 16).stroke({ width: 2, color: col });
+            label(f.name, cx, cy + 11, f.developed ? 0xb9d98c : 0xffc46a, 10);
+            continue;
+          }
           if (f.developed) {
             m.circle(cx, cy, 10).fill({ color: 0x1a1612 }).stroke({ width: 2, color: 0x8fbf5a });
             m.moveTo(cx - 6, cy + 4).lineTo(cx, cy - 6).lineTo(cx + 6, cy + 4).stroke({ width: 2, color: 0x8fbf5a });
@@ -235,12 +282,12 @@ export class MapView {
           label(f.name, cx, cy + 11, f.developed ? 0xb9d98c : 0xffc46a, 10);
           continue;
         }
-        if (leadVisible(s, x, y)) {
-          const cos = cosEstimate(s, x, y)!;
+        if (leadVisible(ex, x, y)) {
+          const cos = cosEstimate(ex, x, y)!;
           m.circle(cx, cy, 9).stroke({ width: 2, color: 0xf2e6cc, alpha: 0.9 });
           m.circle(cx, cy, 3).fill({ color: 0xf2e6cc });
           label(`${Math.round(cos * 100)}%`, cx, cy + 9, 0xf2e6cc, 10);
-          const size = leadSizeEstimate(s, x, y);
+          const size = leadSizeEstimate(ex, x, y);
           if (size) label(`~${fmtNum(size.p50)}`, cx, cy - 22, 0xc8b89a, 9);
         }
       }
@@ -249,7 +296,8 @@ export class MapView {
 
   update(s: GameState, dt: number): void {
     this.time += dt;
-    const ex = s.exploration;
+    if (!this.mapId || (this.mapId === 'shelf' && !s.shelf)) return;
+    const ex = mapOf(s, this.mapId);
     const B = EXPLORATION.block;
     const a = this.anim;
     a.clear();
@@ -276,7 +324,7 @@ export class MapView {
     c.clear();
     if (this.hover) {
       const { x, y } = this.hover;
-      const blk = blockOf(s, x, y);
+      const blk = blockOf(ex, x, y);
       const bx = (blk % bw) * B * CELL, by = Math.floor(blk / bw) * B * CELL;
       c.rect(bx, by, B * CELL, B * CELL).stroke({ width: 1.5, color: 0xf2e6cc, alpha: 0.35 });
       c.rect(x * CELL, y * CELL, CELL, CELL).stroke({ width: 1.5, color: 0xf2e6cc, alpha: 0.8 });

@@ -1,32 +1,28 @@
-import { ECON, EXPLORATION, FACILITIES, LIFTS, MARKET, RESERVOIR, TIME } from './balance';
-import { FIELD_NAMES, emptyFlows, makeFieldFromLead, makeWell } from './newGame';
+import { ECON, FACILITIES, LIFTS, MARKET, RESERVOIR, TIME } from './balance';
+import { mapCfg, mapOf } from './explore';
+import { addLog } from './log';
+import { isSelling, salePrice } from './market';
+import { msg } from './msg';
+import { FIELD_NAMES, SHELF_NAMES, emptyFlows, makeFieldFromLead, makeWell } from './newGame';
 import { checkObjectives } from './objectives';
+import { advancePlatforms, applyPlatformFlows, computePlatformFlows, newTanker, updateWeather } from './offshore';
+import { chokeWells, wellPotentials } from './plant';
+import { platformOfField, rigUser, stormy } from './platform';
 import {
-  cap, exportCapacity, facilityOpex, fieldById, injectionCapacity, isProducing, liftCapacity,
-  marketDepth, repairCost, reserveEstimate, reservoirLiquid, serviceCost, waterCut,
+  cap, exportCapacity, facilityOpex, fieldById, injectionCapacity, isProducing, marketDepth,
+  repairCost, reserveEstimate, serviceCost, wellOpex,
 } from './reservoir';
 import { rand, randNormal, randRange } from './rng';
-import { msg, type Msg } from './msg';
-import type { Bottleneck, CostId, FacilityId, Flows, GameState, LogKind, Well, WellFlow } from './types';
+import type { CostId, Exploration, FacilityId, Flows, GameState, MapId, Well } from './types';
 
-export function addLog(s: GameState, m: Msg, kind: LogKind = 'info'): void {
-  s.log.unshift({ day: s.day, msg: m, kind });
-  if (s.log.length > 80) s.log.length = 80;
-}
-
-export function salePrice(s: GameState): number {
-  return s.market.price * (1 - s.market.impact);
-}
-
-export function isSelling(s: GameState): boolean {
-  const m = s.market;
-  return m.sellMode === 'auto' || (m.sellMode === 'threshold' && salePrice(s) >= m.threshold);
-}
+export { addLog, isSelling, salePrice };
 
 /** Advance the world by dt game days. */
 export function step(s: GameState, dt: number): void {
   updateMarket(s, dt);
+  updateWeather(s, dt);
   advanceJobs(s, dt);
+  advancePlatforms(s, dt);
   const flows = computeFlows(s, dt);
   applyFlows(s, flows, dt);
   updateFields(s, flows, dt);
@@ -58,8 +54,12 @@ function updateMarket(s: GameState, dt: number): void {
 // ---------- jobs ----------
 
 function advanceJobs(s: GameState, dt: number): void {
+  const storm = stormy(s);
   for (const w of s.wells) {
     if (!w.job) continue;
+    const f = fieldById(s, w.fieldId);
+    // Storms stop all work at sea.
+    if (storm && f.offshore) continue;
     w.job.daysLeft -= dt;
     if (w.job.daysLeft > 0) continue;
     const job = w.job;
@@ -74,7 +74,6 @@ function advanceJobs(s: GameState, dt: number): void {
         addLog(s, msg('log.liftInstalled', { well: w.name, lift: msg(`lift.${w.lift}.name`) }), 'good');
         break;
       case 'frac': {
-        const f = fieldById(s, w.fieldId);
         w.stim += ECON.fracBoost * Math.pow(ECON.fracBoostDecayPerFrac, w.fracCount);
         w.fracCount++;
         f.rfFrac = Math.min(0.03, f.rfFrac + ECON.fracRfBonus);
@@ -96,62 +95,74 @@ function advanceJobs(s: GameState, dt: number): void {
 
   for (const f of s.fields) {
     if (!f.devJob) continue;
+    if (storm && f.offshore) continue;
     f.devJob.daysLeft -= dt;
     if (f.devJob.daysLeft > 0) continue;
     f.devJob = null;
     f.developed = true;
     const well = makeWell(s, s.nextId++, f, 0, `${f.name.split(' ')[0]}-1`);
     s.wells.push(well);
-    addLog(s, msg('log.tiedBack', { field: f.name }), 'good');
+    const p = f.offshore ? platformOfField(s, f.id) : undefined;
+    if (p) {
+      p.tankers.push(newTanker(s, p));
+      addLog(s, msg('log.platformOnStream', { field: f.name }), 'good');
+    } else {
+      addLog(s, msg('log.tiedBack', { field: f.name }), 'good');
+    }
   }
 
-  const ex = s.exploration;
+  advanceExploration(s, 'land', dt);
+  if (s.shelf && !storm) advanceExploration(s, 'shelf', dt);
+}
+
+function advanceExploration(s: GameState, map: MapId, dt: number): void {
+  const ex = mapOf(s, map);
   for (const sv of ex.surveys) {
     sv.daysLeft -= dt;
     if (sv.daysLeft > 0) continue;
     ex.blocks[sv.block] = Math.max(ex.blocks[sv.block], sv.kind);
-    const leads = blockCells(s, sv.block).filter((c) => c.lead && (sv.kind === 3 || c.lead.detect2d)).length;
-    addLog(s, msg('log.seismicDone', { kind: sv.kind, leads }), leads ? 'good' : 'info');
+    const leads = blockCells(s, sv.block, map).filter((c) => c.lead && (sv.kind === 3 || c.lead.detect2d)).length;
+    addLog(s, msg(map === 'shelf' ? 'log.shelfSeismicDone' : 'log.seismicDone', { kind: sv.kind, leads }), leads ? 'good' : 'info');
   }
   ex.surveys = ex.surveys.filter((sv) => sv.daysLeft > 0);
 
   if (ex.wildcat) {
     ex.wildcat.daysLeft -= dt;
-    if (ex.wildcat.daysLeft <= 0) resolveWildcat(s);
+    if (ex.wildcat.daysLeft <= 0) resolveWildcat(s, map);
   }
 }
 
-export function blockCells(s: GameState, block: number) {
-  const ex = s.exploration;
-  const bw = ex.w / EXPLORATION.block;
-  const bx = (block % bw) * EXPLORATION.block;
-  const by = Math.floor(block / bw) * EXPLORATION.block;
+export function blockCells(s: GameState, block: number, map: MapId = 'land') {
+  const ex: Exploration = mapOf(s, map);
+  const B = mapCfg(map).block;
+  const bw = ex.w / B;
+  const bx = (block % bw) * B;
+  const by = Math.floor(block / bw) * B;
   const out = [];
-  for (let y = by; y < by + EXPLORATION.block; y++)
-    for (let x = bx; x < bx + EXPLORATION.block; x++) out.push(ex.cells[y * ex.w + x]);
+  for (let y = by; y < by + B; y++)
+    for (let x = bx; x < bx + B; x++) out.push(ex.cells[y * ex.w + x]);
   return out;
 }
 
-function resolveWildcat(s: GameState): void {
-  const ex = s.exploration;
+function resolveWildcat(s: GameState, map: MapId): void {
+  const ex = mapOf(s, map);
   const wc = ex.wildcat!;
   ex.wildcat = null;
   const cell = ex.cells[wc.y * ex.w + wc.x];
   s.stats.wildcats++;
   if (cell.lead && cell.lead.success) {
     const used = new Set(s.fields.map((f) => f.name));
-    const name = FIELD_NAMES.find((n) => !used.has(n)) ?? `Field ${s.nextId}`;
+    const names = map === 'shelf' ? SHELF_NAMES : FIELD_NAMES;
+    const name = names.find((n) => !used.has(n)) ?? `Field ${s.nextId}`;
     const field = makeFieldFromLead(s, s.nextId++, name, wc.x, wc.y, cell.lead, -1);
+    if (map === 'shelf') field.offshore = true;
     s.fields.push(field);
     cell.drilled = 'discovery';
     cell.fieldId = field.id;
     s.stats.discoveries++;
     const est = reserveEstimate(field);
-    if (est.p50 > 1_500_000) {
-      addLog(s, msg('log.gusher', { field: name, p50: est.p50 }), 'jackpot');
-    } else {
-      addLog(s, msg('log.discovery', { field: name, p50: est.p50 }), 'good');
-    }
+    const gusher = est.p50 > (map === 'shelf' ? 15_000_000 : 1_500_000);
+    addLog(s, msg(gusher ? 'log.gusher' : 'log.discovery', { field: name, p50: est.p50 }), gusher ? 'jackpot' : 'good');
   } else {
     cell.drilled = 'dry';
     addLog(s, msg('log.dry', { x: wc.x, y: wc.y }), 'bad');
@@ -160,12 +171,9 @@ function resolveWildcat(s: GameState): void {
 
 // ---------- production ----------
 
-function ratio(rem: number, need: number): number {
-  return need > 1e-9 ? rem / need : Infinity;
-}
-
 export function computeFlows(s: GameState, dt: number): Flows {
   const out = emptyFlows();
+  const onshore = s.wells.filter((w) => !fieldById(s, w.fieldId).offshore);
   const sepCap = cap(s, 'separator');
   const injCap = injectionCapacity(s);
   const swdCap = cap(s, 'swd');
@@ -179,42 +187,10 @@ export function computeFlows(s: GameState, dt: number): Flows {
   const overflow = !selling && s.market.sellMode === 'threshold' && !!s.market.sellWhenFull;
   const oilRoom = Math.max(0, storageCap - s.storage + (selling || overflow ? exportCap * dt : 0)) / dt;
 
-  const pots: { w: Well; fl: WellFlow; gor: number }[] = [];
-  for (const w of s.wells) {
-    if (!isProducing(w)) continue;
-    const f = fieldById(s, w.fieldId);
-    const reservoir = reservoirLiquid(f, w);
-    const liftCap = liftCapacity(f, w);
-    const liquid = Math.min(reservoir, liftCap);
-    const wc = waterCut(f, w);
-    if (reservoir > liftCap * 1.02) out.liftLimitedWells++;
-    pots.push({ w, gor: f.gor, fl: { reservoir, liftCap, wc, liquid, oil: liquid * (1 - wc), water: liquid * wc, gas: 0, inj: 0 } });
-    out.liquidPotential += liquid;
-  }
-
-  // Choke wells to fit the plant. SCADA chokes the wettest wells first;
-  // otherwise every well is choked by the same factor.
-  let bottleneck: Bottleneck = 'none';
-  const limit = (sep: number, water: number, oil: number): number => {
-    const m = Math.max(0, Math.min(1, sep, water, oil));
-    if (m < 1 && bottleneck === 'none') bottleneck = m === sep ? 'separator' : m === water ? 'water' : 'storage';
-    return m;
-  };
-  if (s.techs.scada) {
-    pots.sort((a, b) => a.fl.wc - b.fl.wc);
-    let remSep = sepCap, remWater = waterCap, remOil = oilRoom;
-    for (const p of pots) {
-      const k = limit(ratio(remSep, p.fl.liquid), ratio(remWater, p.fl.water), ratio(remOil, p.fl.oil));
-      p.fl.liquid *= k; p.fl.oil *= k; p.fl.water *= k;
-      remSep -= p.fl.liquid; remWater -= p.fl.water; remOil -= p.fl.oil;
-    }
-  } else {
-    let L = 0, W = 0, O = 0;
-    for (const p of pots) { L += p.fl.liquid; W += p.fl.water; O += p.fl.oil; }
-    const k = limit(ratio(sepCap, L), ratio(waterCap, W), ratio(oilRoom, O));
-    for (const p of pots) { p.fl.liquid *= k; p.fl.oil *= k; p.fl.water *= k; }
-  }
-  out.bottleneck = bottleneck;
+  const { pots, potential, liftLimited } = wellPotentials(s, onshore);
+  out.liquidPotential = potential;
+  out.liftLimitedWells = liftLimited;
+  out.bottleneck = chokeWells(pots, sepCap, waterCap, oilRoom, s.techs.scada);
 
   let powerCost = 0;
   for (const p of pots) {
@@ -226,7 +202,7 @@ export function computeFlows(s: GameState, dt: number): Flows {
   out.choke = out.liquidPotential > 0 ? out.liquid / out.liquidPotential : 1;
 
   // Injection is split evenly between online injectors.
-  const injectors = s.wells.filter((w) => w.status === 'injector' && !w.job);
+  const injectors = onshore.filter((w) => w.status === 'injector' && !w.job);
   for (const w of injectors) {
     out.wells[w.id] = { reservoir: 0, liftCap: 0, wc: 0, liquid: 0, oil: 0, water: 0, gas: 0, inj: injCap / injectors.length };
   }
@@ -250,17 +226,13 @@ export function computeFlows(s: GameState, dt: number): Flows {
   const gasSold = Math.min(out.gas, cap(s, 'compressor'));
   const gasFlared = out.gas - gasSold;
 
-  let wellOpex = 0;
-  for (const w of s.wells) {
-    if (w.status === 'injector') wellOpex += w.job ? 0 : ECON.injectorOpexDay;
-    else if (w.status === 'shutin' || w.status === 'failed') wellOpex += ECON.shutinOpexDay;
-    else if (!w.job) wellOpex += LIFTS[w.lift].opexDay;
-  }
+  let wellCost = 0;
+  for (const w of onshore) wellCost += wellOpex(s, w);
   let facOpex = ECON.hubBaseOpexDay;
   for (const id of Object.keys(FACILITIES) as FacilityId[]) facOpex += facilityOpex(id, s.facilities[id]);
 
   const costs: Partial<Record<CostId, number>> = {
-    wellOpex,
+    wellOpex: wellCost,
     liftPower: powerCost,
     facilities: facOpex,
     water:
@@ -282,6 +254,14 @@ export function computeFlows(s: GameState, dt: number): Flows {
   out.costs = costs;
   out.costTotal = Object.values(costs).reduce((a, b) => a + b, 0);
   out.profit = out.revenue - out.costTotal;
+
+  const total = { oil: out.oil, water: out.water, liquid: out.liquid, profit: out.profit };
+  for (const p of s.platforms) {
+    const pf = computePlatformFlows(s, p, dt, out.wells);
+    out.platforms[p.id] = pf;
+    total.oil += pf.oil; total.water += pf.water; total.liquid += pf.liquid; total.profit += pf.profit;
+  }
+  out.total = total;
   return out;
 }
 
@@ -301,6 +281,10 @@ function applyFlows(s: GameState, fl: Flows, dt: number): void {
   s.stats.oilSold += soldVol;
   s.stats.revenue += fl.revenue * dt;
   s.flows = fl;
+  for (const p of [...s.platforms]) {
+    const pf = fl.platforms[p.id];
+    if (pf) applyPlatformFlows(s, p, pf, dt);
+  }
 }
 
 function updateFields(s: GameState, fl: Flows, dt: number): void {
@@ -334,22 +318,27 @@ function updateWear(s: GameState, fl: Flows, dt: number): void {
     w.condition = Math.max(0, w.condition - LIFTS[w.lift].wearPerDay * (0.3 + 0.7 * util) * dt);
     if (w.condition < ECON.failThreshold && rand(s) < (ECON.failThreshold - w.condition) * ECON.failRate * dt) {
       w.status = 'failed';
-      addLog(s, msg('log.failure', { lift: msg(`lift.${w.lift}.name`), well: w.name, cost: repairCost(w) }), 'bad');
+      addLog(s, msg('log.failure', { lift: msg(`lift.${w.lift}.name`), well: w.name, cost: repairCost(s, w) }), 'bad');
     }
   }
 
   if (!s.techs.maintCrew) return;
+  const storm = stormy(s);
   for (const w of s.wells) {
     if (w.job) continue;
+    const offshore = !!fieldById(s, w.fieldId).offshore;
+    if (offshore && storm) continue;
     if (w.status === 'failed') {
-      const c = repairCost(w);
+      // Offshore repairs need the platform rig.
+      if (offshore && rigBusyOn(s, w)) continue;
+      const c = repairCost(s, w);
       if (s.cash >= c) {
         s.cash -= c;
         w.job = { kind: 'repair', daysLeft: ECON.repairDays, total: ECON.repairDays };
         addLog(s, msg('log.crewRepair', { well: w.name, cost: c }));
       }
     } else if ((w.status === 'active' || w.status === 'shutin') && w.condition < ECON.maintThreshold) {
-      const c = serviceCost(w);
+      const c = serviceCost(s, w);
       if (s.cash >= c) {
         s.cash -= c;
         w.condition = 1;
@@ -358,15 +347,19 @@ function updateWear(s: GameState, fl: Flows, dt: number): void {
   }
 }
 
+function rigBusyOn(s: GameState, w: Well): boolean {
+  return !!rigUser(s, w.fieldId);
+}
+
 function recordHistory(s: GameState): void {
   const h = s.history;
   const fl = s.flows;
   h.day.push(Math.floor(s.day));
   h.price.push(s.market.price);
-  h.oil.push(fl.oil);
-  h.water.push(fl.water);
+  h.oil.push(fl.total.oil);
+  h.water.push(fl.total.water);
   h.cash.push(s.cash);
-  h.profit.push(fl.profit);
+  h.profit.push(fl.total.profit);
   if (h.day.length > TIME.historyDays) {
     for (const k of Object.keys(h) as (keyof typeof h)[]) h[k].shift();
   }

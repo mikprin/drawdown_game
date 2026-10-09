@@ -1,14 +1,19 @@
-import { ECON, EXPLORATION, MARKET } from './balance';
+import { ECON, EXPLORATION, MARKET, OFFSHORE, SHELF } from './balance';
 import { msg } from './msg';
 import { rand, randLogNormal, randNormal, randRange, type RngHolder } from './rng';
-import type { Cell, Exploration, Field, Flows, GameState, Lead, Well } from './types';
+import type { Cell, Exploration, Field, Flows, GameState, Lead, PlatformFlows, Well } from './types';
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export const FIELD_NAMES = [
   'Ash Creek', 'Red Mesa', 'Coyote Draw', 'Iron Flats', 'Sable Ridge', 'Dry Fork',
   'Black Hollow', 'Mule Tank', 'Cinder Butte', 'Hollis Bend', 'Stone Wash', 'Bitter Lake',
   'Gallows Flat', 'Rattler Hill', 'Copper Sink', 'Widow Gulch',
+];
+
+export const SHELF_NAMES = [
+  'Selkie', 'Grey Skerry', 'Storm Petrel', 'Kelp Bank', 'Black Reef', 'Puffin Deep',
+  'Mackerel Rise', 'Shoal Gate', 'Whaleback', 'Saltmarsh Deep', 'Kraken Spur', 'Gull Ledge',
 ];
 
 export function emptyFlows(): Flows {
@@ -18,6 +23,17 @@ export function emptyFlows(): Flows {
     exportCap: 0, injCap: 0, injected: 0, injFromProduced: 0, swd: 0, waterTrucked: 0,
     sold: 0, soldPipe: 0, gasSold: 0, gasFlared: 0, salePrice: 0, revenue: 0,
     costs: {}, costTotal: 0, profit: 0,
+    platforms: {}, total: { oil: 0, water: 0, liquid: 0, profit: 0 },
+  };
+}
+
+export function emptyPlatformFlows(): PlatformFlows {
+  return {
+    liquidPotential: 0, liquid: 0, oil: 0, water: 0, gas: 0, choke: 1, bottleneck: 'none',
+    liftLimitedWells: 0, sepCap: 0, waterCap: 0, storageCap: 0, loaded: 0,
+    injCap: 0, injected: 0, injFromProduced: 0, overboard: 0, waterTreatCap: 0,
+    powerDemand: 0, gasFuel: 0, turbineCap: 0, gasInjected: 0, gasInjCap: 0, gasFlared: 0,
+    revenue: 0, costs: {}, costTotal: 0, profit: 0,
   };
 }
 
@@ -103,6 +119,67 @@ function makeLead(h: RngHolder, prior: number, size: number): Lead {
   };
 }
 
+/**
+ * The shelf: coast and shore base on the west, water deepening eastward to
+ * the slope, which a jack-up cannot reach. Fewer, bigger leads than onshore.
+ */
+export function generateShelf(h: RngHolder): Exploration {
+  const { w, h: hgt, block } = SHELF;
+  const depthNoise = valueNoise(h, w, hgt, 5);
+  const coastNoise = valueNoise(h, 1, hgt, 4);
+  const coast = (y: number) => 2 + Math.round(coastNoise(0, y) * 2);
+  const hubY = 6 + Math.floor(rand(h) * 4);
+  const hubX = coast(hubY) - 1;
+
+  const plays: Play[] = [
+    { x: randRange(h, 6, 9), y: randRange(h, 3, 12), r: randRange(h, 2, 3), s: randRange(h, 0.3, 0.4), size: 1 },
+    { x: randRange(h, 11, 15), y: randRange(h, 2, 13), r: randRange(h, 2.5, 3.5), s: randRange(h, 0.38, 0.5), size: 1.5 },
+    { x: randRange(h, 17, 21), y: randRange(h, 3, 12), r: randRange(h, 2.5, 4), s: randRange(h, 0.45, 0.6), size: 2.3 },
+  ];
+
+  const cells: Cell[] = [];
+  for (let y = 0; y < hgt; y++) {
+    const cx = coast(y);
+    for (let x = 0; x < w; x++) {
+      let terrain = 4;
+      if (x >= cx) {
+        const d = (x - cx) / (w - cx) + (depthNoise(x, y) - 0.5) * 0.35;
+        terrain = d < 0.25 ? 5 : d < 0.52 ? 6 : d < 0.8 ? 7 : 8;
+      }
+      let prior = 0, size = 1;
+      for (const p of plays) {
+        const d2 = (x - p.x) ** 2 + (y - p.y) ** 2;
+        const v = p.s * Math.exp(-d2 / (2 * p.r * p.r));
+        prior += v;
+        if (v > 0.1) size = Math.max(size, p.size);
+      }
+      prior = terrain === 4 ? 0.01 : Math.min(0.85, prior + 0.02);
+      cells.push({ terrain, prior, heatNoise: randNormal(h), lead: null, drilled: 'none', fieldId: -1 });
+      const cell = cells[cells.length - 1];
+      if (terrain !== 4 && rand(h) < 0.02 + prior * 0.22) cell.lead = makeShelfLead(h, prior, size);
+    }
+  }
+  const blocks = new Array((w / block) * (hgt / block)).fill(0);
+  return { w, h: hgt, hubX, hubY, cells, blocks, surveys: [], wildcat: null };
+}
+
+function makeShelfLead(h: RngHolder, prior: number, size: number): Lead {
+  const cos = Math.min(0.7, Math.max(0.03, prior * randRange(h, 0.5, 1.1) + 0.02));
+  return {
+    cos,
+    success: rand(h) < cos,
+    ooip: randLogNormal(h, 22_000_000 * size, 0.8),
+    rfBase: randRange(h, 0.2, 0.3),
+    pi: randLogNormal(h, 2000, 0.35),
+    gor: randRange(h, 500, 2200),
+    detect2d: rand(h) < 0.7,
+    noise2d: randNormal(h),
+    noise3d: randNormal(h),
+    sizeBias: randNormal(h),
+    costMult: 1 + size * randRange(h, 0.1, 0.3),
+  };
+}
+
 export function makeFieldFromLead(
   h: RngHolder, id: number, name: string, x: number, y: number, lead: Lead, padIndex: number,
 ): Field {
@@ -181,11 +258,18 @@ export function newGame(seed = (Math.random() * 2 ** 32) >>> 0): GameState {
       noise: 0, impact: 0, sellMode: 'auto', threshold: 75, sellWhenFull: false,
     },
     exploration,
+    shelf: null,
+    platforms: [],
+    weather: newWeather(),
     history: { day: [], price: [], oil: [], water: [], cash: [], profit: [] },
     log: [{ day: 0, msg: msg('log.start'), kind: 'info' }],
-    stats: { oilProduced: 0, oilSold: 0, revenue: 0, wellsDrilled: 0, wildcats: 0, discoveries: 0 },
+    stats: { oilProduced: 0, oilSold: 0, revenue: 0, wellsDrilled: 0, wildcats: 0, discoveries: 0, cargoes: 0 },
     objectivesDone: [],
     flows: emptyFlows(),
     savedAt: Date.now(),
   };
+}
+
+export function newWeather() {
+  return { next: OFFSHORE.stormGap[1], storm: 0, warned: false };
 }

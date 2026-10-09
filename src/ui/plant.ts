@@ -1,12 +1,14 @@
 import { buyFacility, buyTech, setSellMode, setSellWhenFull, setThreshold, techLockReason } from '../game/actions';
 import { TECHS } from '../game/balance';
 import { fmtGasNum, fmtMoney, fmtNum, fmtPrice } from '../game/format';
+import { platformById } from '../game/platform';
 import { cap, facilityNextValue } from '../game/reservoir';
 import type { CostId, FacilityId, SellMode, TechId } from '../game/types';
 import { t, type HelpId, type MsgKey } from '../i18n';
 import { ActionButton, bar, h, setBar, setText, toggleClass } from './dom';
 import type { Ctx } from './ctx';
 import { help, term, type HelpSource, type HelpView } from './help';
+import { PlatformCascade } from './platform';
 
 interface Gauge {
   val: HTMLElement;
@@ -30,6 +32,9 @@ export class PlantPanel {
   private pnl = h('div', { class: 'pnl' });
   private techRows: { id: TechId; el: HTMLElement; btn: ActionButton }[] = [];
   private storageAside = h('span', { class: 'aside' });
+  private onshore: HTMLElement;
+  private platform: PlatformCascade;
+  private pnlTitle = h('span');
 
   constructor(private ctx: Ctx) {
     const gauge = (key: string, kind = '') => {
@@ -92,8 +97,8 @@ export class PlantPanel {
     };
     const injNote = () => t('plant.injNote', { v: ctx.s.flows.injFromProduced });
 
-    this.el.append(
-      h('div', { class: 'section' },
+    this.platform = new PlatformCascade(ctx);
+    this.onshore = h('div', { class: 'section' },
         title('plant.title', 'plant'),
         node('wells', 'plant.wells', withNote(() => term('wellsNode'), liftNote), 'wells', 'good'),
         arrow(),
@@ -115,7 +120,10 @@ export class PlantPanel {
               sub('plant.gasSold', () => facHelp('compressor'), 'gsold', 'gas', upg('compressor', 'plant.compressor')),
               sub('plant.flared', 'flaring', 'gflare', 'gas'))),
         ),
-      ),
+      );
+    this.el.append(
+      this.onshore,
+      this.platform.el,
       h('div', { class: 'section' },
         title('market.title', 'market', this.storageAside),
         this.price, help(this.priceSub, 'impact', false),
@@ -123,7 +131,7 @@ export class PlantPanel {
         this.threshRow,
         this.whenFullRow,
       ),
-      h('div', { class: 'section' }, title('pnl.title', 'pnl'), this.pnl),
+      h('div', { class: 'section' }, h('div', { class: 'section-title' }, help(this.pnlTitle, 'pnl')), this.pnl),
       h('div', { class: 'section' }, title('tech.title', 'tech'), this.buildTechs()),
     );
   }
@@ -144,6 +152,11 @@ export class PlantPanel {
   update(): void {
     const s = this.ctx.s;
     const fl = s.flows;
+    const plat = this.ctx.ui.view === 'sea' && this.ctx.ui.platform !== null ? platformById(s, this.ctx.ui.platform) : undefined;
+    const pf = plat ? fl.platforms[plat.id] : undefined;
+    this.onshore.style.display = pf ? 'none' : '';
+    this.platform.el.style.display = pf ? '' : 'none';
+    if (plat && pf) this.platform.update(plat, pf);
     const bpd = ' ' + t('unit.bpd');
     const gas = ' ' + t('unit.gas');
     const set = (k: string, num: number, den: number, unit = '', fmt = fmtNum) => {
@@ -172,17 +185,20 @@ export class PlantPanel {
     const sale = m.price * (1 - m.impact);
     setText(this.price, fmtPrice(m.price));
     setText(this.priceSub, t('market.realise', { sale, impact: m.impact }));
-    setText(this.storageAside, t('market.inTanks', { v: s.storage }));
+    setText(this.storageAside, plat ? t('market.inPlatform', { v: plat.storage }) : t('market.inTanks', { v: s.storage }));
     for (const mode of Object.keys(this.modeBtns) as SellMode[]) toggleClass(this.modeBtns[mode], 'on', m.sellMode === mode);
     this.threshRow.style.display = m.sellMode === 'threshold' ? '' : 'none';
     setText(this.thresh, t('market.sellAbove', { v: m.threshold }));
     this.whenFullRow.style.display = this.threshRow.style.display;
     this.whenFull.checked = !!m.sellWhenFull;
 
-    const rows: [string, number, string][] = [[t('pnl.sales'), fl.revenue, 'good']];
-    for (const [k, v] of Object.entries(fl.costs) as [CostId, number][]) if (v > 0.5) rows.push([t(`cost.${k}`), -v, '']);
+    // P&L of the scene on screen: the onshore hub, or the selected platform (cargo sales averaged).
+    const src = pf ?? fl;
+    setText(this.pnlTitle, t(pf ? 'pnl.titlePlatform' : 'pnl.title'));
+    const rows: [string, number, string][] = [[t(pf ? 'pnl.cargoAvg' : 'pnl.sales'), src.revenue, 'good']];
+    for (const [k, v] of Object.entries(src.costs) as [CostId, number][]) if (v > 0.5) rows.push([t(`cost.${k}`), -v, '']);
     const html = rows.map(([k, v, c]) => `<span class="muted">${k}</span><span class="num ${c}">${v >= 0 ? '+' : ''}${fmtMoney(v)}</span>`).join('') +
-      `<span class="total">${t('pnl.net')}</span><span class="total num ${fl.profit >= 0 ? 'good' : 'bad'}">${fl.profit >= 0 ? '+' : ''}${fmtMoney(fl.profit)}</span>`;
+      `<span class="total">${t('pnl.net')}</span><span class="total num ${src.profit >= 0 ? 'good' : 'bad'}">${src.profit >= 0 ? '+' : ''}${fmtMoney(src.profit)}</span>`;
     if (this.pnl.innerHTML !== html) this.pnl.innerHTML = html;
 
     for (const row of this.techRows) {

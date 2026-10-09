@@ -86,11 +86,13 @@ export class TopBar {
     const fl = s.flows;
     setText(this.cash, fmtMoney(s.cash));
     toggleClass(this.cash, 'bad', s.cash < 0);
-    setText(this.profit, (fl.profit >= 0 ? '+' : '') + fmtMoney(fl.profit));
-    toggleClass(this.profit, 'good', fl.profit > 0);
-    toggleClass(this.profit, 'bad', fl.profit < 0);
-    setText(this.oil, fmtRate(fl.oil));
-    setText(this.wc, fl.liquid > 0 ? fmtPct(fl.water / fl.liquid) : '—');
+    // Totals across the onshore hub and every platform.
+    const tot = fl.total;
+    setText(this.profit, (tot.profit >= 0 ? '+' : '') + fmtMoney(tot.profit));
+    toggleClass(this.profit, 'good', tot.profit > 0);
+    toggleClass(this.profit, 'bad', tot.profit < 0);
+    setText(this.oil, fmtRate(tot.oil));
+    setText(this.wc, tot.liquid > 0 ? fmtPct(tot.water / tot.liquid) : '—');
     const sale = s.market.price * (1 - s.market.impact);
     this.price.innerHTML = `${fmtPrice(s.market.price)} <small>→ ${fmtPrice(sale)}</small>`;
     setText(this.date, fmtDate(s.day));

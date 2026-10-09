@@ -1,5 +1,5 @@
-import { ECON, FACILITIES, LIFTS, MARKET, RESERVOIR } from './balance';
-import type { FacilityId, Field, GameState, Well } from './types';
+import { ECON, FACILITIES, LIFTS, MARKET, OFFSHORE, RESERVOIR } from './balance';
+import type { FacilityId, Field, GameState, LiftType, Well } from './types';
 
 export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
@@ -42,6 +42,7 @@ export function liftCapacity(f: Field, w: Well): number {
   const def = LIFTS[w.lift];
   let cap = def.capacity;
   if (w.lift === 'flowing') cap *= Math.pow(pressure(f), RESERVOIR.flowingPressureExp);
+  if (f.offshore) cap *= OFFSHORE.liftCapMult;
   return cap * conditionMult(w.condition);
 }
 
@@ -115,8 +116,9 @@ export function waterHandlingCapacity(s: GameState): number {
   return injectionCapacity(s) + cap(s, 'swd') + cap(s, 'waterTrucks');
 }
 
+/** Onshore injection: pump capacity, limited by how many onshore injectors are online. */
 export function injectionCapacity(s: GameState): number {
-  const injectors = s.wells.filter((w) => w.status === 'injector' && !w.job).length;
+  const injectors = s.wells.filter((w) => w.status === 'injector' && !w.job && !fieldById(s, w.fieldId).offshore).length;
   return Math.min(cap(s, 'injection'), injectors * ECON.injectivity);
 }
 
@@ -146,16 +148,37 @@ export function freeSlot(s: GameState, f: Field): number | null {
   return null;
 }
 
-export function fracCost(w: Well): number {
-  return Math.round(ECON.fracBaseCost * Math.pow(ECON.fracGrowth, w.fracCount));
+export function isOffshoreWell(s: GameState, w: Well): boolean {
+  return !!fieldById(s, w.fieldId).offshore;
 }
 
-export function serviceCost(w: Well): number {
-  return Math.round(ECON.serviceBase + LIFTS[w.lift].cost * ECON.serviceFactor * (1 - w.condition));
+export function fracCost(s: GameState, w: Well): number {
+  const k = isOffshoreWell(s, w) ? OFFSHORE.fracCostMult : 1;
+  return Math.round(ECON.fracBaseCost * Math.pow(ECON.fracGrowth, w.fracCount) * k);
 }
 
-export function repairCost(w: Well): number {
-  return Math.round(Math.max(ECON.repairMin, LIFTS[w.lift].cost * ECON.repairFactor));
+export function serviceCost(s: GameState, w: Well): number {
+  const k = isOffshoreWell(s, w) ? OFFSHORE.serviceMult : 1;
+  return Math.round((ECON.serviceBase + LIFTS[w.lift].cost * ECON.serviceFactor * (1 - w.condition)) * k);
+}
+
+export function repairCost(s: GameState, w: Well): number {
+  const k = isOffshoreWell(s, w) ? OFFSHORE.repairMult : 1;
+  return Math.round(Math.max(ECON.repairMin, LIFTS[w.lift].cost * ECON.repairFactor) * k);
+}
+
+/** Lift purchase price; offshore installs need the platform rig and cost more. */
+export function liftCost(s: GameState, w: Well, lift: LiftType): number {
+  return Math.round(LIFTS[lift].cost * (isOffshoreWell(s, w) ? OFFSHORE.liftCostMult : 1));
+}
+
+/** Daily opex of a well in its current state. */
+export function wellOpex(s: GameState, w: Well): number {
+  const off = isOffshoreWell(s, w);
+  if (w.status === 'injector') return w.job ? 0 : off ? OFFSHORE.injectorOpexDay : ECON.injectorOpexDay;
+  if (w.status === 'shutin' || w.status === 'failed') return off ? OFFSHORE.shutinOpexDay : ECON.shutinOpexDay;
+  if (w.job) return 0;
+  return LIFTS[w.lift].opexDay * (off ? OFFSHORE.wellOpexMult : 1);
 }
 
 export function marketDepth(s: GameState): number {
@@ -166,6 +189,7 @@ export function marketDepth(s: GameState): number {
 export function wellNetPerDay(s: GameState, w: Well): number {
   const wf = s.flows.wells[w.id];
   if (!wf || w.status !== 'active' || w.job) return 0;
+  if (isOffshoreWell(s, w)) return offshoreWellNet(s, w);
   const fl = s.flows;
   const lift = LIFTS[w.lift];
   const waterCost = fl.water > 0 ? (fl.costs.water ?? 0) / fl.water : ECON.waterTruckPerBbl;
@@ -174,4 +198,22 @@ export function wellNetPerDay(s: GameState, w: Well): number {
   const soldShare = fl.gas > 0 ? Math.min(1, cap(s, 'compressor') / fl.gas) : 0;
   const gasValue = soldShare * ECON.gasPricePerMcf - (1 - soldShare) * ECON.flarePerMcf;
   return wf.oil * (price - transport) + wf.gas * gasValue - lift.opexDay - wf.liquid * lift.powerPerBbl - wf.water * waterCost;
+}
+
+/**
+ * Offshore version: oil at the realised price less a per-barrel share of the
+ * tanker charter, lift power at the platform's diesel rate, water at the
+ * platform's average handling cost. Gas is valued as turbine fuel.
+ */
+function offshoreWellNet(s: GameState, w: Well): number {
+  const wf = s.flows.wells[w.id];
+  const p = s.platforms.find((x) => x.fieldId === w.fieldId);
+  const pf = p ? s.flows.platforms[p.id] : undefined;
+  if (!wf || !pf) return 0;
+  const price = s.flows.salePrice || s.market.price;
+  const charter = pf.oil > 0 ? (pf.costs.charter ?? 0) / pf.oil : 0;
+  const waterCost = pf.water > 0 ? (pf.costs.water ?? 0) / pf.water : OFFSHORE.overboardPerBbl;
+  const lift = LIFTS[w.lift];
+  const power = wf.liquid * lift.powerPerBbl * OFFSHORE.powerMult;
+  return wf.oil * (price - charter) - wellOpex(s, w) - power - wf.water * waterCost;
 }

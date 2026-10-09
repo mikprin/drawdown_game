@@ -125,7 +125,7 @@ export class SiteView {
   // ---------- sync with game state ----------
 
   sync(s: GameState): void {
-    const developedPads = s.fields.filter((f) => f.developed || f.devJob).map((f) => f.padIndex).sort();
+    const developedPads = s.fields.filter((f) => (f.developed || f.devJob) && f.padIndex >= 0).map((f) => f.padIndex).sort();
     const spec: GroundSpec = { pads: developedPads, pond: s.facilities.swd > 0, pipeline: s.facilities.pipeline > 0 };
     const gk = groundKey(spec);
     if (gk !== this.groundKeyStr) {
@@ -144,7 +144,7 @@ export class SiteView {
 
   private syncPlant(s: GameState): void {
     const f = s.facilities;
-    const devJobs = s.fields.filter((x) => x.devJob).map((x) => x.padIndex).join(',');
+    const devJobs = s.fields.filter((x) => x.devJob && x.padIndex >= 0).map((x) => x.padIndex).join(',');
     const key = [f.separator, f.storage, f.waterTrucks, f.swd, f.injection, f.compressor, Math.min(8, f.trucks), devJobs].join('|');
     if (key === this.plantKey) return;
     this.plantKey = key;
@@ -182,7 +182,7 @@ export class SiteView {
 
     // Pads under construction get a rig on slot 0.
     for (const fl of s.fields) {
-      if (!fl.devJob) continue;
+      if (!fl.devJob || fl.padIndex < 0) continue;
       const [gx, gy] = slotPos(fl.padIndex, 0);
       add(this.bank.derrick, gx, gy, 0.9);
     }

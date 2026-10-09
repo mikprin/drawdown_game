@@ -1,19 +1,35 @@
 import {
-  convertToInjector, convertToProducer, drillWell, expandPad, fracWell, plugWell,
+  convertToInjector, convertToProducer, decommission, drillDays, drillWell, expandPad, fracWell, plugWell,
   repairWell, serviceWell, setLift, toggleShutIn,
 } from '../game/actions';
-import { ECON, LIFTS } from '../game/balance';
+import { ECON, LIFTS, OFFSHORE } from '../game/balance';
 import { fmtBbl, fmtDays, fmtGas, fmtMoney, fmtNum, fmtPct, fmtRate, fmtRateShort } from '../game/format';
 import { msg } from '../game/msg';
+import { decomCost, platformOfField, rigUser, waterDepthClass } from '../game/platform';
 import {
   depletion, fieldById, fieldWells, pressure, reserveEstimate, waterCut, wellById, wellNetPerDay,
 } from '../game/reservoir';
-import type { LiftType, Well, WellStatus } from '../game/types';
+import type { Field, GameState, LiftType, Well, WellStatus } from '../game/types';
 import { t, type HelpId, type MsgKey } from '../i18n';
 import { ActionButton, bar, h, setBar, setText, toggleClass } from './dom';
-import type { Ctx } from './ctx';
+import { currentField, type Ctx } from './ctx';
 import { help, term, type HelpSource } from './help';
 import { confirmModal } from './modal';
+
+const DEPTH: Record<number, MsgKey> = { 5: 'terrain.shallow', 6: 'terrain.midShelf', 7: 'terrain.outerShelf' };
+
+/** Fields with a tab in the left panel: developed onshore fields, or every field that has a platform. */
+function tabFields(s: GameState, sea: boolean): Field[] {
+  if (sea) return s.platforms.map((p) => fieldById(s, p.fieldId));
+  return s.fields.filter((f) => f.developed && !f.offshore);
+}
+
+/** A platform tab gets a red dot while its plant is choking the wells. */
+export function platformAlert(s: GameState, fieldId: number): boolean {
+  const p = platformOfField(s, fieldId);
+  const pf = p ? s.flows.platforms[p.id] : undefined;
+  return !!pf && pf.bottleneck !== 'none';
+}
 
 const LIFT_ORDER: LiftType[] = ['flowing', 'rodpump', 'gaslift', 'esp'];
 const STATUS_HELP: Partial<Record<WellStatus, HelpId>> = { failed: 'failed', shutin: 'shutin', injector: 'injector' };
@@ -43,6 +59,7 @@ export class OpsPanel {
   readonly el = h('div');
   private tabs = h('div', { class: 'tabs' });
   private tabsKey = '';
+  private tabsTitle = h('span');
   private fieldName = h('span', { class: 'name' });
   private fieldSub = h('span', { class: 'sub' });
   private p90 = h('div', { class: 'v' });
@@ -51,6 +68,15 @@ export class OpsPanel {
   private kv: Record<string, HTMLElement> = {};
   private pressureBar = bar('good');
   private fieldBtns: ActionButton[] = [];
+  private sea = false;
+  private seaRows: HTMLElement;
+  private seaKv: Record<string, HTMLElement> = {};
+  private decomBtn: ActionButton;
+  private stageBox = h('div');
+  private stageLbl = h('span');
+  private stageDays = h('span');
+  private stageBar = bar('tall');
+  private fieldBody: HTMLElement;
   private wells = h('div', { class: 'wells' });
   private wellsKey = '';
   private rows = new Map<number, Row>();
@@ -65,14 +91,30 @@ export class OpsPanel {
       const label = h('span', { class: 'k' }, t(k));
       return [id ? help(label, id) : label, this.kv[key]];
     };
-    const drill = new ActionButton(t('ops.drill'), () => drillWell(ctx.s, ctx.ui.field, true), () => ctx.act((s) => drillWell(s, ctx.ui.field)), { cls: 'primary', help: 'drill' });
-    const pad = new ActionButton(t('ops.expand'), () => expandPad(ctx.s, ctx.ui.field, true), () => ctx.act((s) => expandPad(s, ctx.ui.field)), { help: 'pad' });
+    const fid = () => currentField(ctx);
+    const drill = new ActionButton(t('ops.drill'), () => drillWell(ctx.s, fid(), true), () => ctx.act((s) => drillWell(s, fid())),
+      { cls: 'primary', help: () => term(fieldById(ctx.s, fid()).offshore ? 'drillOffshore' : 'drill') });
+    const pad = new ActionButton(t('ops.expand'), () => expandPad(ctx.s, fid(), true), () => ctx.act((s) => expandPad(s, fid())),
+      { help: () => term(fieldById(ctx.s, fid()).offshore ? 'wellbay' : 'pad') });
     this.fieldBtns = [drill, pad];
-    this.el.append(
-      h('div', { class: 'section' }, h('div', { class: 'section-title' }, t('ops.fields')), this.tabs),
-      h('div', { class: 'section' },
-        h('div', { class: 'card rivets' },
-          h('div', { class: 'title-row' }, this.fieldName, this.fieldSub),
+    const pid = () => platformOfField(ctx.s, fid())?.id ?? -1;
+    this.decomBtn = new ActionButton(t('ops.decom'), () => decommission(ctx.s, pid(), true), () => {
+      const f = fieldById(ctx.s, fid());
+      const p = platformOfField(ctx.s, f.id);
+      if (!p) return;
+      confirmModal(t('decom.title'), t('decom.text', { field: f.name, cost: decomCost(ctx.s, p), days: OFFSHORE.decomDays }), t('decom.ok'),
+        () => ctx.act((s) => decommission(s, p.id)));
+    }, { cls: 'danger small', help: 'decom' });
+    const seaKv = (k: MsgKey, key: string, id?: HelpId) => {
+      this.seaKv[key] = h('span', { class: 'v' });
+      const label = h('span', { class: 'k' }, t(k));
+      return [id ? help(label, id) : label, this.seaKv[key]];
+    };
+    this.seaRows = h('div', null,
+      h('div', { class: 'kv' }, ...seaKv('ops.rig', 'rig', 'platformRig'), ...seaKv('ops.weather', 'weather', 'storm'), ...seaKv('ops.decomCost', 'decom', 'decom')),
+      h('div', { class: 'btn-row' }, this.decomBtn.el));
+    this.stageBox.append(h('div', { class: 'progress' }, h('div', { class: 'lbl' }, this.stageLbl, this.stageDays), this.stageBar));
+    this.fieldBody = h('div', null,
           help(h('div', { class: 'reserve' },
             h('div', null, h('div', { class: 'k' }, t('ops.p90')), this.p90),
             h('div', { class: 'p50' }, h('div', { class: 'k' }, t('ops.p50')), this.p50),
@@ -85,7 +127,15 @@ export class OpsPanel {
             ...kvRow('ops.slots', 'slots', 'pad')),
           h('div', { class: 'kv' }, ...kvRow('ops.pressure', 'pressure', 'pressure')),
           this.pressureBar,
-          h('div', { class: 'btn-row' }, drill.el, pad.el),
+          h('div', { class: 'btn-row' }, drill.el, pad.el));
+    this.el.append(
+      h('div', { class: 'section' }, h('div', { class: 'section-title' }, this.tabsTitle), this.tabs),
+      h('div', { class: 'section' },
+        h('div', { class: 'card rivets' },
+          h('div', { class: 'title-row' }, this.fieldName, this.fieldSub),
+          this.stageBox,
+          this.fieldBody,
+          this.seaRows,
         ),
       ),
       h('div', { class: 'section' }, h('div', { class: 'section-title' }, t('ops.wells'), this.wellsAside), this.wells),
@@ -96,21 +146,48 @@ export class OpsPanel {
   update(): void {
     const s = this.ctx.s;
     const ui = this.ctx.ui;
-    const fields = s.fields.filter((f) => f.developed);
-    if (!fields.some((f) => f.id === ui.field)) ui.field = fields[0].id;
+    const sea = ui.view === 'sea';
+    this.sea = sea;
+    const fields = tabFields(s, sea);
+    if (sea) {
+      if (!s.platforms.some((p) => p.id === ui.platform)) ui.platform = s.platforms[0]?.id ?? null;
+    } else if (!fields.some((f) => f.id === ui.field)) ui.field = fields[0].id;
+    const cur = currentField(this.ctx);
 
-    const tk = fields.map((f) => f.id).join(',') + '|' + ui.field;
+    const tk = `${sea}|` + fields.map((f) => `${f.id}${platformAlert(s, f.id) ? '!' : ''}`).join(',') + '|' + cur;
     if (tk !== this.tabsKey) {
       this.tabsKey = tk;
+      setText(this.tabsTitle, t(sea ? 'ops.platforms' : 'ops.fields'));
+      const pick = (f: Field) => () => (sea ? this.ctx.selectPlatform(platformOfField(s, f.id)!.id) : this.ctx.selectField(f.id));
       this.tabs.replaceChildren(...fields.map((f) =>
-        h('button', { class: `tab ${f.id === ui.field ? 'on' : ''}`, onclick: () => this.ctx.selectField(f.id) }, f.name)));
+        h('button', { class: `tab ${f.id === cur ? 'on' : ''} ${sea && platformAlert(s, f.id) ? 'alert' : ''}`, onclick: pick(f) }, f.name)));
+    }
+    if (sea && ui.platform === null) {
+      setText(this.fieldName, t('ops.noPlatforms'));
+      setText(this.fieldSub, '');
+      for (const el of [this.fieldBody, this.seaRows, this.stageBox]) el.style.display = 'none';
+      this.wells.replaceChildren();
+      this.wellsKey = '';
+      this.updateDetail();
+      return;
     }
 
-    const f = fieldById(s, ui.field);
+    const f = fieldById(s, cur);
     const fw = fieldWells(s, f.id);
     const est = reserveEstimate(f);
     setText(this.fieldName, f.name);
-    setText(this.fieldSub, t(f.id === 1 ? 'ops.home' : 'ops.satellite'));
+    setText(this.fieldSub, f.offshore ? t(DEPTH[waterDepthClass(s, f)] ?? 'terrain.shallow') : t(f.id === 1 ? 'ops.home' : 'ops.satellite'));
+    this.seaRows.style.display = sea ? '' : 'none';
+    const plat = sea ? platformOfField(s, f.id) : undefined;
+    const stage = f.devJob ? { key: 'ops.jackingUp' as MsgKey, job: f.devJob } : plat?.decom ? { key: 'ops.decomUnderway' as MsgKey, job: plat.decom } : null;
+    this.stageBox.style.display = stage ? '' : 'none';
+    this.fieldBody.style.display = stage ? 'none' : '';
+    if (stage) {
+      setText(this.stageLbl, t(stage.key));
+      setText(this.stageDays, fmtDays(stage.job.daysLeft));
+      setBar(this.stageBar, 1 - stage.job.daysLeft / stage.job.total);
+    }
+    if (plat) this.updateSea(s, f.id);
     setText(this.p90, fmtNum(est.p90));
     setText(this.p50, fmtNum(est.p50));
     setText(this.p10, fmtNum(est.p10));
@@ -125,11 +202,27 @@ export class OpsPanel {
     const p = pressure(f);
     setText(this.kv.pressure, t('ops.depleted', { p, d: depletion(f) }));
     setBar(this.pressureBar, p);
-    this.fieldBtns[0].setLabel(fw.length === 0 ? t('ops.drill') : t('ops.drillDays', { days: ECON.drillDays }));
+    this.fieldBtns[0].setLabel(fw.length === 0 ? t('ops.drill') : t('ops.drillDays', { days: drillDays(s, f.id) }));
+    this.fieldBtns[1].setLabel(t(f.offshore ? 'ops.expandBay' : 'ops.expand'));
     for (const b of this.fieldBtns) b.update();
 
     this.updateWells(fw);
     this.updateDetail();
+  }
+
+  private updateSea(s: GameState, fieldId: number): void {
+    const p = platformOfField(s, fieldId)!;
+    const user = rigUser(s, fieldId);
+    const storm = s.weather.storm > 0;
+    setText(this.seaKv.rig, user
+      ? t(storm ? 'ops.rigWaiting' : 'ops.rigBusy', { job: t(`job.${user.job!.kind}`), well: user.name, days: fmtDays(user.job!.daysLeft) })
+      : t('ops.rigFree'));
+    toggleClass(this.seaKv.rig, 'amber', !!user);
+    setText(this.seaKv.weather, storm ? t('ops.storm', { days: fmtDays(s.weather.storm) }) : s.weather.warned ? t('ops.stormSoon', { days: fmtDays(s.weather.next) }) : t('ops.calm'));
+    toggleClass(this.seaKv.weather, 'bad', storm || s.weather.warned);
+    setText(this.seaKv.decom, p.decom ? '—' : fmtMoney(decomCost(s, p)));
+    this.decomBtn.el.style.display = p.decom ? 'none' : '';
+    this.decomBtn.update();
   }
 
   private updateWells(fw: Well[]): void {
@@ -179,7 +272,7 @@ export class OpsPanel {
     const s = this.ctx.s;
     const id = this.ctx.ui.well;
     const w = id !== null ? wellById(s, id) : undefined;
-    if (!w || w.fieldId !== this.ctx.ui.field) {
+    if (!w || w.fieldId !== currentField(this.ctx)) {
       if (this.detailKey !== 'none') {
         this.detailKey = 'none';
         this.detailUpdate = null;
@@ -265,7 +358,7 @@ export class OpsPanel {
       actions.append(btn(t('btn.toProducer'), () => convertToProducer(ctx.s, id, true), act((s) => convertToProducer(s, id)), 'toProducer'));
     } else {
       actions.append(
-        btn(t('btn.frac', { days: ECON.fracDays }), () => fracWell(ctx.s, id, true), act((s) => fracWell(s, id)), 'frac', 'primary'),
+        btn(t('btn.frac', { days: ECON.fracDays }), () => fracWell(ctx.s, id, true), act((s) => fracWell(s, id)), this.sea ? 'fracOffshore' : 'frac', 'primary'),
         btn(t('btn.service'), () => serviceWell(ctx.s, id, true), act((s) => serviceWell(s, id)), 'service'),
         btn(t(w.status === 'shutin' ? 'btn.reopen' : 'btn.shutIn'), () => toggleShutIn(ctx.s, id, true), act((s) => toggleShutIn(s, id)), 'shutin'),
         btn(t('btn.toInjector'), () => convertToInjector(ctx.s, id, true), act((s) => convertToInjector(s, id)), 'toInjector'),

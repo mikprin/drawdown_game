@@ -4,6 +4,7 @@ import { TIME } from './game/balance';
 import { fmtBbl, fmtMoney } from './game/format';
 import { msg } from './game/msg';
 import { newGame } from './game/newGame';
+import { platformOfField } from './game/platform';
 import { reserveEstimate, wellById } from './game/reservoir';
 import { clearSave, loadGame, saveGame, simulateOffline, type OfflineReport } from './game/save';
 import { step } from './game/sim';
@@ -11,6 +12,7 @@ import type { GameState } from './game/types';
 import { getLang, setLang, t } from './i18n';
 import { PADS } from './render/layout';
 import { iso } from './render/paint';
+import { DECK_FOCUS } from './render/sea';
 import { Stage, type ViewMode } from './render/stage';
 import { BottomBar } from './ui/bottom';
 import type { Ctx, UiState } from './ui/ctx';
@@ -41,7 +43,7 @@ async function main(): Promise<void> {
   const stage = await Stage.create(view);
   $('loading').remove();
 
-  const ui: UiState = { view: 'site', field: 1, well: null, cell: null, speed: 1 };
+  const ui: UiState = { view: 'site', field: 1, platform: s.platforms[0]?.id ?? null, well: null, cell: null, map: 'land', speed: 1 };
   let resetting = false;
   const persist = () => {
     if (!resetting) saveGame(s);
@@ -57,15 +59,40 @@ async function main(): Promise<void> {
       refresh();
     },
     setView(v: ViewMode) {
+      if (v === 'sea' && !s.platforms.length) return;
       ui.view = v;
+      if (v === 'sea' && !s.platforms.some((p) => p.id === ui.platform)) ui.platform = s.platforms[0].id;
       stage.setMode(v);
       refresh();
     },
     selectWell(id) {
       ui.well = id;
       const w = id !== null ? wellById(s, id) : undefined;
-      if (w) ui.field = w.fieldId;
+      if (w) {
+        const p = platformOfField(s, w.fieldId);
+        if (p) ui.platform = p.id;
+        else ui.field = w.fieldId;
+      }
       stage.site.selectedWell = id;
+      stage.sea.selectedWell = id;
+      refresh();
+    },
+    selectPlatform(id) {
+      ui.platform = id;
+      ui.well = null;
+      stage.sea.selectedWell = null;
+      if (ui.view !== 'sea') {
+        ui.view = 'sea';
+        stage.setMode('sea');
+      }
+      stage.focus(DECK_FOCUS[0], DECK_FOCUS[1]);
+      refresh();
+    },
+    setMap(m) {
+      if (m === ui.map) return;
+      ui.map = m;
+      ui.cell = null;
+      stage.map.selected = null;
       refresh();
     },
     selectField(id) {
@@ -111,7 +138,7 @@ async function main(): Promise<void> {
 
   const helpCard = new HelpCard($('help'));
   let top: TopBar, ops: OpsPanel, explore: ExplorePanel, plant: PlantPanel, bottom: BottomBar;
-  let siteTab: HTMLButtonElement, mapTab: HTMLButtonElement, hint: HTMLDivElement;
+  let siteTab: HTMLButtonElement, seaTab: HTMLButtonElement, mapTab: HTMLButtonElement, hint: HTMLDivElement;
 
   /** Build every DOM panel from scratch. Panels read strings once, so a language switch rebuilds them. */
   function mountUi(): void {
@@ -126,51 +153,68 @@ async function main(): Promise<void> {
     $('right').append(plant.el);
     bottom = new BottomBar($('bottom'), ctx);
     siteTab = h('button', { class: 'btn', onclick: () => ctx.setView('site') }, t('view.site'));
+    seaTab = h('button', { class: 'btn', onclick: () => ctx.setView('sea') }, t('view.sea'));
     mapTab = h('button', { class: 'btn', onclick: () => ctx.setView('map') }, t('view.map'));
     hint = h('div', { class: 'view-hint' });
-    view.append(h('div', { class: 'view-tabs' }, siteTab, mapTab), hint);
+    view.append(h('div', { class: 'view-tabs' }, siteTab, seaTab, mapTab), hint);
   }
   mountUi();
 
   const tooltip = $('tooltip');
   stage.site.onSelectWell = (id) => ctx.selectWell(id);
+  stage.sea.onSelectWell = (id) => ctx.selectWell(id);
   stage.map.onSelectCell = (x, y) => ctx.selectCell(x, y);
   stage.map.onHover = (cell, gx, gy) => {
     if (!cell) {
       tooltip.hidden = true;
       return;
     }
-    tooltip.innerHTML = cellTooltip(s, cell.x, cell.y);
+    tooltip.innerHTML = cellTooltip(s, stage.map.map, cell.x, cell.y);
     tooltip.hidden = false;
     const r = stage.app.canvas.getBoundingClientRect();
     tooltip.style.left = `${Math.min(window.innerWidth - 270, r.left + gx + 16)}px`;
     tooltip.style.top = `${r.top + gy + 16}px`;
   };
 
-  let seen = { wildcats: s.stats.wildcats, discoveries: s.stats.discoveries };
+  let seen = { wildcats: s.stats.wildcats, discoveries: s.stats.discoveries, storm: s.weather.storm > 0 };
 
   function refresh(): void {
-    stage.sync(s);
+    if (ui.view === 'sea' && !s.platforms.length) {
+      // The last platform was decommissioned: back to land.
+      ui.view = 'site';
+      stage.setMode('site');
+    }
+    stage.sync(s, ui.platform, ui.map);
     top.update();
-    ops.el.style.display = ui.view === 'site' ? '' : 'none';
+    ops.el.style.display = ui.view !== 'map' ? '' : 'none';
     explore.el.style.display = ui.view === 'map' ? '' : 'none';
-    if (ui.view === 'site') ops.update();
+    if (ui.view !== 'map') ops.update();
     else explore.update();
     plant.update();
     bottom.update();
     toggleClass(siteTab, 'on', ui.view === 'site');
+    toggleClass(seaTab, 'on', ui.view === 'sea');
     toggleClass(mapTab, 'on', ui.view === 'map');
-    hint.textContent = t(ui.view === 'site' ? 'view.hintSite' : 'view.hintMap');
+    // Tabs carry the alarms of scenes you are not looking at: red = a plant is choking wells, blue = storm at sea.
+    seaTab.style.display = s.platforms.length ? '' : 'none';
+    toggleClass(siteTab, 'alert', s.flows.bottleneck !== 'none');
+    toggleClass(seaTab, 'alert', Object.values(s.flows.platforms).some((pf) => pf.bottleneck !== 'none'));
+    toggleClass(seaTab, 'storm', s.weather.storm > 0);
+    hint.textContent = t(ui.view === 'site' ? 'view.hintSite' : ui.view === 'sea' ? 'view.hintSea' : 'view.hintMap');
     helpCard.update();
+    const storm = s.weather.storm > 0;
+    if (storm && !seen.storm && s.platforms.length) banner(view, t('banner.storm'), t('banner.stormSub'), 'dry');
+    seen.storm = storm;
     if (s.stats.wildcats > seen.wildcats) {
       if (s.stats.discoveries > seen.discoveries) {
         const f = s.fields[s.fields.length - 1];
         const est = reserveEstimate(f);
-        banner(view, t(est.p50 > 1_500_000 ? 'banner.gusher' : 'banner.discovery'), t('banner.discoverySub', { field: f.name, p50: est.p50 }));
+        const gusher = est.p50 > (f.offshore ? 15_000_000 : 1_500_000);
+        banner(view, t(gusher ? 'banner.gusher' : 'banner.discovery'), t('banner.discoverySub', { field: f.name, p50: est.p50 }));
       } else {
         banner(view, t('banner.dry'), t('banner.drySub'), 'dry');
       }
-      seen = { wildcats: s.stats.wildcats, discoveries: s.stats.discoveries };
+      seen = { ...seen, wildcats: s.stats.wildcats, discoveries: s.stats.discoveries };
     }
   }
 

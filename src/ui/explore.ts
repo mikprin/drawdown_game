@@ -1,21 +1,34 @@
-import { buyTech, developCost, developField, drillWildcat, surveyBlock } from '../game/actions';
-import { EXPLORATION } from '../game/balance';
 import {
-  blockOf, cellAt, cosEstimate, heatEstimate, isDrillable, leadSizeEstimate, surveyLevel,
+  buyTech, developCost, developField, drillWildcat, surveyBlock, surveyDays,
+} from '../game/actions';
+import { EXPLORATION, OFFSHORE } from '../game/balance';
+import {
+  blockOf, cellAt, cosEstimate, heatEstimate, isDrillable, leadSizeEstimate, mapCfg, mapOf, surveyLevel,
 } from '../game/explore';
 import { fmtBbl, fmtDays, fmtGor, fmtNum, fmtPct } from '../game/format';
+import { installCost, platformOfField } from '../game/platform';
 import { reserveEstimate } from '../game/reservoir';
-import type { GameState } from '../game/types';
+import type { Field, GameState, MapId } from '../game/types';
 import { t, type HelpId, type MsgKey } from '../i18n';
-import { ActionButton, bar, h, setBar, setText } from './dom';
+import { ActionButton, bar, h, setBar, setText, toggleClass } from './dom';
 import type { Ctx } from './ctx';
 import { help, term } from './help';
 
-const TERRAIN: MsgKey[] = ['terrain.plain', 'terrain.hills', 'terrain.marsh', 'terrain.lake'];
+const TERRAIN: MsgKey[] = [
+  'terrain.plain', 'terrain.hills', 'terrain.marsh', 'terrain.lake',
+  'terrain.coast', 'terrain.shallow', 'terrain.midShelf', 'terrain.outerShelf', 'terrain.slope',
+];
 const SURVEY: MsgKey[] = ['survey.none', 'survey.none', 'survey.2d', 'survey.3d'];
+
+/** Fields that belong to a map, minus the inherited home field. */
+function mapFields(s: GameState, map: MapId): Field[] {
+  return s.fields.filter((f) => f.id !== 1 && !!f.offshore === (map === 'shelf'));
+}
 
 export class ExplorePanel {
   readonly el = h('div');
+  private mapSwitch: HTMLElement;
+  private mapBtns: Record<MapId, HTMLButtonElement>;
   private license: HTMLElement;
   private licenseBtn: ActionButton;
   private cellBox = h('div');
@@ -28,6 +41,9 @@ export class ExplorePanel {
   private findsKey = '';
 
   constructor(private ctx: Ctx) {
+    const mapBtn = (m: MapId, key: MsgKey) => h('button', { class: 'btn small', onclick: () => ctx.setMap(m) }, t(key));
+    this.mapBtns = { land: mapBtn('land', 'ex.mapLand'), shelf: mapBtn('shelf', 'ex.mapShelf') };
+    this.mapSwitch = h('div', { class: 'section' }, h('div', { class: 'seg' }, this.mapBtns.land, this.mapBtns.shelf));
     this.licenseBtn = new ActionButton(t('ex.buyLicense'), () => buyTech(ctx.s, 'exploration', true), () => ctx.act((s) => buyTech(s, 'exploration')),
       { cls: 'primary block', help: () => ({ title: t('tech.exploration.name'), body: t('tech.exploration.desc') }) });
     this.license = h('div', { class: 'section' },
@@ -36,6 +52,7 @@ export class ExplorePanel {
         h('p', { class: 'muted' }, t('ex.noLicenseText')),
         this.licenseBtn.el));
     this.el.append(
+      this.mapSwitch,
       this.license,
       h('div', { class: 'section' }, h('div', { class: 'section-title' }, t('ex.cell')), this.cellBox),
       h('div', { class: 'section' }, h('div', { class: 'section-title' }, t('ex.ops')), this.ops),
@@ -44,8 +61,14 @@ export class ExplorePanel {
     );
   }
 
+  private get map(): MapId {
+    return this.ctx.ui.map === 'shelf' && this.ctx.s.shelf ? 'shelf' : 'land';
+  }
+
   update(): void {
     const s = this.ctx.s;
+    this.mapSwitch.style.display = s.shelf ? '' : 'none';
+    for (const m of ['land', 'shelf'] as const) toggleClass(this.mapBtns[m], 'on', this.map === m);
     this.license.style.display = s.techs.exploration ? 'none' : '';
     this.licenseBtn.update();
     this.updateCell(s);
@@ -56,21 +79,26 @@ export class ExplorePanel {
   private updateCell(s: GameState): void {
     const sel = this.ctx.ui.cell;
     const ctx = this.ctx;
+    const map = this.map;
+    const ex = mapOf(s, map);
     if (!sel) {
       if (this.cellKey !== 'none') {
         this.cellKey = 'none';
         this.cellUpdate = null;
-        this.cellBox.replaceChildren(h('div', { class: 'empty' }, t('ex.clickCell')));
+        this.cellBox.replaceChildren(h('div', { class: 'empty' }, t(map === 'shelf' ? 'ex.clickCellShelf' : 'ex.clickCell')));
       }
       return;
     }
     const { x, y } = sel;
-    const c = cellAt(s, x, y);
-    const key = `${x},${y}|${surveyLevel(s, x, y)}|${c.drilled}|${c.fieldId}|${s.fields.find((f) => f.id === c.fieldId)?.developed}|${s.techs.exploration}|${s.techs.seismic3d}`;
+    const c = cellAt(ex, x, y);
+    const fld = s.fields.find((f) => f.id === c.fieldId);
+    const key = `${map}|${x},${y}|${surveyLevel(ex, x, y)}|${c.drilled}|${c.fieldId}|${fld?.developed}|${!!fld?.devJob}|${fld?.abandoned}|` +
+      `${s.techs.exploration}|${s.techs.seismic3d}|${fld ? !!platformOfField(s, fld.id) : ''}`;
     if (key !== this.cellKey) {
       this.cellKey = key;
-      const blk = blockOf(s, x, y);
-      const lvl = surveyLevel(s, x, y);
+      const cfg = mapCfg(map);
+      const blk = blockOf(ex, x, y);
+      const lvl = surveyLevel(ex, x, y);
       const btns: ActionButton[] = [];
       let devUpdate: (() => void) | null = null;
       const kv: Node[] = [];
@@ -78,26 +106,34 @@ export class ExplorePanel {
         const label = h('span', { class: 'k' }, k);
         kv.push(id ? help(label, id) : label, h('span', { class: `v ${cls}` }, v));
       };
-      row(t('ex.terrain'), t(TERRAIN[c.terrain]), '', 'terrain');
+      row(t(map === 'shelf' ? 'ex.depth' : 'ex.terrain'), t(TERRAIN[c.terrain]), c.terrain === 8 ? 'faint' : '', map === 'shelf' ? 'depth' : 'terrain');
       row(t('ex.block', { n: blk + 1 }), t(SURVEY[lvl]), '', 'survey');
-      const heat = heatEstimate(s, x, y);
+      const heat = heatEstimate(ex, x, y);
       if (heat !== null) row(t('ex.geoChance'), fmtPct(heat), '', 'geoChance');
-      const cos = cosEstimate(s, x, y);
+      const cos = cosEstimate(ex, x, y);
       if (cos !== null) row(t('ex.cos'), t('ex.cosVal', { p: cos, e: lvl === 3 ? 6 : 18 }), 'amber', 'cos');
       else if (lvl > 0 && c.drilled === 'none') row(t('ex.lead'), t(lvl === 3 ? 'ex.noneMapped' : 'ex.noneSeen'), 'faint', 'lead');
-      const size = leadSizeEstimate(s, x, y);
+      const size = leadSizeEstimate(ex, x, y);
       if (size) row(t('ex.size'), `${fmtNum(size.p90)} / ${fmtNum(size.p50)} / ${fmtNum(size.p10)}`, '', 'eur');
       if (c.drilled === 'dry') row(t('ex.result'), t('ex.dryHole'), 'bad');
+      if (c.terrain === 8) row(t('ex.result'), t('ex.tooDeepNote'), 'faint');
 
-      const field = c.fieldId > 0 ? s.fields.find((f) => f.id === c.fieldId) : undefined;
+      const field = fld;
+      const badge = !field ? null
+        : field.abandoned ? ['', 'ex.abandoned']
+          : field.developed ? ['good', 'ex.producing']
+            : field.devJob ? ['amber', 'ex.building'] : ['amber', 'ex.discovery'];
       const body: (Node | null)[] = [
         h('div', { class: 'title-row' }, h('span', { class: 'name' }, field ? field.name : t('ex.cellName', { x, y })),
-          field ? h('span', { class: `badge right ${field.developed ? 'good' : 'amber'}` },
-            t(field.developed ? 'ex.producing' : field.devJob ? 'ex.building' : 'ex.discovery')) : null),
+          badge ? h('span', { class: `badge right ${badge[0]}` }, t(badge[1] as MsgKey)) : null),
         h('div', { class: 'kv' }, ...kv),
       ];
 
-      if (field && !field.developed) {
+      if (field && field.offshore && !field.abandoned && platformOfField(s, field.id) && !field.devJob) {
+        const go = h('button', { class: 'btn primary block', onclick: () => ctx.selectPlatform(platformOfField(ctx.s, field.id)!.id) }, t('ex.toPlatform'));
+        body.push(h('div', { class: 'btn-row' }, go));
+      }
+      if (field && !field.developed && !field.abandoned) {
         const est = reserveEstimate(field);
         body.push(help(h('div', { class: 'reserve' },
           h('div', null, h('div', { class: 'k' }, t('ops.p90')), h('div', { class: 'v' }, fmtNum(est.p90))),
@@ -109,12 +145,17 @@ export class ExplorePanel {
         if (field.devJob) {
           const pb = bar('tall');
           const lbl = h('span');
-          body.push(h('div', { class: 'progress' }, h('div', { class: 'lbl' }, h('span', null, t('ex.buildingPad')), lbl), pb));
+          body.push(h('div', { class: 'progress' }, h('div', { class: 'lbl' }, h('span', null, t(field.offshore ? 'ex.buildingPlatform' : 'ex.buildingPad')), lbl), pb));
           devUpdate = () => {
             if (!field.devJob) return;
             setText(lbl, fmtDays(field.devJob.daysLeft));
             setBar(pb, 1 - field.devJob.daysLeft / field.devJob.total);
           };
+        } else if (field.offshore) {
+          const b = new ActionButton(t('ex.install', { days: OFFSHORE.installDays }), () => developField(ctx.s, field.id, true), () => ctx.act((st) => developField(st, field.id)),
+            { cls: 'primary block', help: () => ({ ...term('install'), body: `${t('help.install.b')} ${t('ex.installCost', { cost: installCost(ctx.s, field) })}` }) });
+          btns.push(b);
+          body.push(h('div', { class: 'btn-row' }, b.el));
         } else {
           const b = new ActionButton(t('ex.develop', { days: EXPLORATION.developDays }), () => developField(ctx.s, field.id, true), () => ctx.act((st) => developField(st, field.id)),
             { cls: 'primary block', help: () => ({ ...term('develop'), body: `${t('help.develop.b')} ${t('ex.developCost', { cost: developCost(ctx.s, field.id) })}` }) });
@@ -124,15 +165,15 @@ export class ExplorePanel {
       }
 
       const surveyHelp = (title: MsgKey, hint: MsgKey) => () => ({ title: t(title), body: t(hint) });
-      const sv2 = new ActionButton(t('ex.sv2', { days: EXPLORATION.survey2dDays }), () => surveyBlock(ctx.s, blk, 2, true), () => ctx.act((st) => surveyBlock(st, blk, 2)),
+      const sv2 = new ActionButton(t('ex.sv2', { days: surveyDays(2, map) }), () => surveyBlock(ctx.s, blk, 2, true, map), () => ctx.act((st) => surveyBlock(st, blk, 2, false, map)),
         { cls: 'small', help: surveyHelp('survey.2d', 'ex.sv2Hint') });
-      const sv3 = new ActionButton(t('ex.sv3', { days: EXPLORATION.survey3dDays }), () => surveyBlock(ctx.s, blk, 3, true), () => ctx.act((st) => surveyBlock(st, blk, 3)),
+      const sv3 = new ActionButton(t('ex.sv3', { days: surveyDays(3, map) }), () => surveyBlock(ctx.s, blk, 3, true, map), () => ctx.act((st) => surveyBlock(st, blk, 3, false, map)),
         { cls: 'small', help: surveyHelp('survey.3d', 'ex.sv3Hint') });
       btns.push(sv2, sv3);
       body.push(h('div', { class: 'btn-grid' }, sv2.el, sv3.el));
-      if (isDrillable(s, x, y)) {
-        const wc = new ActionButton(t('ex.wildcat', { days: EXPLORATION.wildcatDays }), () => drillWildcat(ctx.s, x, y, true), () => ctx.act((st) => drillWildcat(st, x, y)),
-          { cls: 'primary block', help: () => ({ ...term('wildcat'), note: c.lead ? undefined : t('ex.blind'), noteCls: 'amber' }) });
+      if (isDrillable(ex, x, y)) {
+        const wc = new ActionButton(t('ex.wildcat', { days: cfg.wildcatDays }), () => drillWildcat(ctx.s, x, y, true, map), () => ctx.act((st) => drillWildcat(st, x, y, false, map)),
+          { cls: 'primary block', help: () => ({ ...term(map === 'shelf' ? 'shelfWildcat' : 'wildcat'), note: c.lead ? undefined : t('ex.blind'), noteCls: 'amber' }) });
         btns.push(wc);
         body.push(h('div', { class: 'btn-row' }, wc.el));
       }
@@ -146,12 +187,15 @@ export class ExplorePanel {
   }
 
   private updateOps(s: GameState): void {
-    const ex = s.exploration;
-    const key = `${ex.wildcat ? `${ex.wildcat.x},${ex.wildcat.y}` : '-'}|${ex.surveys.map((v) => v.block + ':' + v.kind).join(',')}`;
+    const map = this.map;
+    const ex = mapOf(s, map);
+    const storm = map === 'shelf' && s.weather.storm > 0;
+    const key = `${map}|${storm}|${ex.wildcat ? `${ex.wildcat.x},${ex.wildcat.y}` : '-'}|${ex.surveys.map((v) => v.block + ':' + v.kind).join(',')}`;
     if (key !== this.opsKey) {
       this.opsKey = key;
       const items: { lbl: HTMLElement; bar: HTMLElement; get: () => [number, number] }[] = [];
       const rows: Node[] = [];
+      if (storm) rows.push(help(h('div', { class: 'storm-note' }, t('ex.stormHold')), 'storm', false));
       const add = (title: string, get: () => [number, number]) => {
         const lbl = h('span');
         const b = bar('tall');
@@ -160,10 +204,11 @@ export class ExplorePanel {
       };
       if (ex.wildcat) {
         const w = ex.wildcat;
-        add(t('ex.rigAt', { x: w.x, y: w.y }), () => [ex.wildcat?.daysLeft ?? 0, w.total]);
+        add(t(map === 'shelf' ? 'ex.jackupAt' : 'ex.rigAt', { x: w.x, y: w.y }), () => [ex.wildcat?.daysLeft ?? 0, w.total]);
       }
-      for (const sv of ex.surveys) add(t('ex.crew', { kind: sv.kind, n: sv.block + 1 }), () => [sv.daysLeft, sv.total]);
-      this.ops.replaceChildren(...(rows.length ? rows : [h('div', { class: 'empty' }, t('ex.idle'))]));
+      for (const sv of ex.surveys) add(t(map === 'shelf' ? 'ex.vessel' : 'ex.crew', { kind: sv.kind, n: sv.block + 1 }), () => [sv.daysLeft, sv.total]);
+      if (!ex.wildcat && !ex.surveys.length) rows.push(h('div', { class: 'empty' }, t(map === 'shelf' ? 'ex.idleShelf' : 'ex.idle')));
+      this.ops.replaceChildren(...rows);
       this.opsUpdate = () => {
         for (const it of items) {
           const [left, total] = it.get();
@@ -176,20 +221,21 @@ export class ExplorePanel {
   }
 
   private updateFinds(s: GameState): void {
-    const found = s.fields.filter((f) => f.id !== 1);
-    const key = found.map((f) => `${f.id}:${f.developed}:${!!f.devJob}`).join(',');
+    const map = this.map;
+    const found = mapFields(s, map);
+    const key = map + found.map((f) => `${f.id}:${f.developed}:${!!f.devJob}:${!!f.abandoned}`).join(',');
     if (key !== this.findsKey) {
       this.findsKey = key;
       const rows = found.map((f) => {
         const est = reserveEstimate(f);
         const sel = h('button', { class: 'btn small ghost', onclick: () => this.ctx.selectCell(f.cellX, f.cellY) }, t('ex.show'));
-        const state = t(f.developed ? 'ex.fProducing' : f.devJob ? 'ex.fBuilding' : 'ex.fAwaiting');
+        const state = t(f.abandoned ? 'ex.fAbandoned' : f.developed ? 'ex.fProducing' : f.devJob ? 'ex.fBuilding' : 'ex.fAwaiting');
         return h('div', { class: 'tech' },
           h('span', { class: 'nm' }, f.name),
           sel,
           h('div', { class: 'desc' }, `${state} · P50 ${fmtBbl(est.p50)}`));
       });
-      this.finds.replaceChildren(...(rows.length ? rows : [h('div', { class: 'empty' }, t('ex.nothing'))]));
+      this.finds.replaceChildren(...(rows.length ? rows : [h('div', { class: 'empty' }, t(map === 'shelf' ? 'ex.nothingShelf' : 'ex.nothing'))]));
     }
   }
 }
@@ -206,17 +252,19 @@ function legend(): HTMLElement {
   );
 }
 
-export function cellTooltip(s: GameState, x: number, y: number): string {
-  const c = cellAt(s, x, y);
-  const lvl = surveyLevel(s, x, y);
+export function cellTooltip(s: GameState, map: MapId, x: number, y: number): string {
+  const ex = mapOf(s, map);
+  const c = cellAt(ex, x, y);
+  const lvl = surveyLevel(ex, x, y);
   const lines = [`<b>${t('ex.cellName', { x, y })}</b> · ${t(TERRAIN[c.terrain])}`, `<span class="muted">${t(SURVEY[lvl])}</span>`];
-  const heat = heatEstimate(s, x, y);
+  const heat = heatEstimate(ex, x, y);
   if (heat !== null) lines.push(`${t('ex.geoChance')} ${fmtPct(heat)}`);
-  const cos = cosEstimate(s, x, y);
+  const cos = cosEstimate(ex, x, y);
   if (cos !== null) lines.push(`<span class="amber">${t('ex.ttLead', { p: cos })}</span>`);
-  const size = leadSizeEstimate(s, x, y);
+  const size = leadSizeEstimate(ex, x, y);
   if (size) lines.push(t('ex.ttP50', { v: size.p50 }));
   if (c.drilled === 'dry') lines.push(`<span class="bad">${t('ex.dryHole')}</span>`);
+  if (c.terrain === 8) lines.push(`<span class="faint">${t('ex.tooDeepNote')}</span>`);
   if (c.fieldId > 0) lines.push(`<span class="good">${s.fields.find((f) => f.id === c.fieldId)?.name}</span>`);
   return lines.join('<br>');
 }
