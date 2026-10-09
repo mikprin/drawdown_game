@@ -201,6 +201,7 @@ button { font: inherit; color: inherit; }
 .dropdown .item.on::after { content: ' ✓'; color: var(--good); }
 .dropdown .sep { height: 1px; margin: 5px 0; background: var(--line); }
 .dropdown .head { padding: 3px 14px 2px; font-family: var(--head); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--faint); }
+.dropdown .volume { display: block; width: calc(100% - 28px); margin: 4px 14px 6px; accent-color: var(--amber); cursor: pointer; }
 
 /* ---------- tabs ---------- */
 

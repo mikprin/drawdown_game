@@ -1,3 +1,4 @@
+import { hasMusic, musicOn, musicVolume, setMusicOn, setMusicVolume } from '../audio/music';
 import { fmtDate, fmtMoney, fmtPct, fmtPrice, fmtRate } from '../game/format';
 import { getLang, LANGS, t, type HelpId, type Lang, type MsgKey } from '../i18n';
 import { h, setText, toggleClass } from './dom';
@@ -13,7 +14,7 @@ const GEAR_SVG = '<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="t
   '<circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="3.2" stroke-dasharray="3.1 3.18"/>' +
   '<circle cx="12" cy="12" r="5.6" fill="none" stroke="currentColor" stroke-width="2.6"/></svg>';
 
-/** Gear button with a dropdown: save, new game, language. Keeps rarely used actions out of the top bar. */
+/** Gear button with a dropdown: save, new game, language, music. Keeps rarely used actions out of the top bar. */
 function settingsMenu(ctx: Ctx): HTMLElement {
   const gear = h('button', { class: 'btn small gear', title: t('menu.title'), 'aria-haspopup': 'menu', 'aria-expanded': 'false' });
   gear.innerHTML = GEAR_SVG;
@@ -43,6 +44,25 @@ function settingsMenu(ctx: Ctx): HTMLElement {
     h('div', { class: 'head' }, t('menu.lang')),
     ...LANGS.map((l) => item(LANG_NAMES[l], () => ctx.setLang(l), l === getLang() ? 'on' : '')),
   );
+  if (hasMusic()) {
+    const volume = h('input', {
+      type: 'range', min: 0, max: 100, value: Math.round(musicVolume() * 100), class: 'volume', 'aria-label': t('menu.volume'),
+      oninput: () => setMusicVolume(Number(volume.value) / 100),
+    });
+    list.append(
+      h('div', { class: 'sep' }),
+      h('div', { class: 'head' }, t('menu.music')),
+      // Stays open on click, so the check mark is flipped in place.
+      h('button', {
+        class: `item ${musicOn() ? 'on' : ''}`, role: 'menuitemcheckbox',
+        onclick: (e: Event) => {
+          setMusicOn(!musicOn());
+          toggleClass(e.currentTarget as HTMLElement, 'on', musicOn());
+        },
+      }, t('menu.musicPlay')),
+      volume,
+    );
+  }
   return wrap;
 }
 

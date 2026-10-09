@@ -1,4 +1,5 @@
 import './ui/style.css';
+import { initMusic } from './audio/music';
 import * as actions from './game/actions';
 import { TIME } from './game/balance';
 import { fmtBbl, fmtMoney } from './game/format';
@@ -28,6 +29,7 @@ const $ = (id: string) => document.getElementById(id)!;
 
 async function main(): Promise<void> {
   document.documentElement.lang = getLang();
+  initMusic();
   $('loading').textContent = t('loading');
   let s: GameState;
   let offline: OfflineReport | null = null;

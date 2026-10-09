@@ -20,6 +20,8 @@ PORT=80 docker compose up -d --build    # other host port
 
 Multi-stage build: Node runs tests and `vite build`, nginx serves `dist/` (config in `deploy/nginx.conf`). To update: `git pull && docker compose up -d --build`.
 
+Music tracks are not in git: run `scripts/music.sh` (encodes `resources/music/*` into `src/assets/music/`, needs ffmpeg) before building (the Docker build copies the working tree). Without them the game runs silently.
+
 ## Layout
 
 - `src/game/` — pure simulation, no DOM. Seeded RNG lives in the state, so runs are deterministic.
