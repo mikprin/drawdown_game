@@ -1,15 +1,15 @@
-import { LIFTS, MARKET, OFFSHORE } from './balance';
+import { LIFTS, MARKET, OFFSHORE, TERMINAL } from './balance';
 import { addLog } from './log';
 import { isSelling, salePrice } from './market';
 import { msg } from './msg';
 import { emptyPlatformFlows } from './newGame';
 import { chokeWells, wellPotentials } from './plant';
 import {
-  legDays, modulesOpex, moduleValue, platformLive, stormy,
+  legDays, modulesOpex, moduleValue, platformLive, stormy, tankerDest,
 } from './platform';
 import { fieldById, fieldWells, wellOpex } from './reservoir';
 import { randRange } from './rng';
-import type { GameState, Platform, PlatformFlows, Tanker, WellFlow } from './types';
+import type { GameState, Platform, PlatformFlows, Tanker, TerminalFlows, WellFlow } from './types';
 
 /** The shelf part of a simulation step: weather, platform plants, tankers, decommissioning. */
 
@@ -122,6 +122,7 @@ export function computePlatformFlows(s: GameState, p: Platform, dt: number, well
   };
   pf.costTotal = Object.values(pf.costs).reduce((a, b) => a + b, 0);
   pf.profit = pf.revenue - pf.costTotal;
+  pf.value = pf.oil * salePrice(s);
   return pf;
 }
 
@@ -156,7 +157,6 @@ function sellCargo(s: GameState, p: Platform, t: Tanker): void {
 
 function updateTankers(s: GameState, p: Platform, dt: number): void {
   const storm = stormy(s);
-  const leg = legDays(s, p);
   for (const t of p.tankers) {
     switch (t.state) {
       case 'moored':
@@ -164,7 +164,8 @@ function updateTankers(s: GameState, p: Platform, dt: number): void {
         t.moored += dt;
         if (t.cargo >= OFFSHORE.tankerCargo - 1 || (t.moored >= OFFSHORE.maxMooredDays && t.cargo > 0)) {
           t.state = 'outbound';
-          t.daysLeft = leg;
+          t.dest = tankerDest(s);
+          t.daysLeft = legDays(s, p, t.dest);
         }
         break;
       case 'outbound':
@@ -172,11 +173,32 @@ function updateTankers(s: GameState, p: Platform, dt: number): void {
         if (t.daysLeft <= 0) t.state = 'port';
         break;
       case 'port':
-        // Floor and Hold apply at sea too: the tanker waits in port for the price.
-        if (!isSelling(s)) break;
-        sellCargo(s, p, t);
+        if (t.dest === 'terminal' && s.terminal) {
+          // Discharge into the terminal tanks; a full terminal keeps the tanker waiting alongside.
+          const tm = s.terminal;
+          const room = Math.max(0, TERMINAL.tanks[tm.tanks].value - tm.storage);
+          const u = Math.min(t.cargo, room, TERMINAL.unloadRate * dt);
+          tm.storage += u;
+          t.cargo -= u;
+          if (s.flows.terminal) s.flows.terminal.unloaded += u / dt;
+          if (t.cargo > 0.5) break;
+          t.cargo = 0;
+          s.stats.cargoes++;
+        } else {
+          // Floor and Hold apply at sea too: the tanker waits in port for the price,
+          // unless there is a terminal to divert to.
+          if (!isSelling(s)) {
+            if (s.terminal) {
+              t.dest = 'terminal';
+              t.state = 'outbound';
+              t.daysLeft = OFFSHORE.legBase - TERMINAL.legBase;
+            }
+            break;
+          }
+          sellCargo(s, p, t);
+        }
         t.state = 'inbound';
-        t.daysLeft = leg;
+        t.daysLeft = legDays(s, p, t.dest);
         break;
       case 'inbound':
         t.daysLeft -= dt;
@@ -202,4 +224,33 @@ function updateTankers(s: GameState, p: Platform, dt: number): void {
 
 export function newTanker(s: GameState, p: Platform): Tanker {
   return { state: 'inbound', daysLeft: legDays(s, p), cargo: 0, moored: 0 };
+}
+
+// ---------- coastal terminal ----------
+
+/** Terminal sales follow the market mode, like the onshore tank farm. */
+export function computeTerminalFlows(s: GameState, dt: number): TerminalFlows | null {
+  const tm = s.terminal;
+  if (!tm) return null;
+  const storageCap = TERMINAL.tanks[tm.tanks].value;
+  const exportCap = TERMINAL.jetty[tm.jetty].value;
+  const selling = isSelling(s);
+  const overflow = !selling && s.market.sellMode === 'threshold' && !!s.market.sellWhenFull && tm.storage >= storageCap * 0.98;
+  const sold = selling || overflow ? Math.min(exportCap * dt, tm.storage) / dt : 0;
+  let waiting = 0;
+  for (const p of s.platforms) for (const t of p.tankers) if (t.state === 'port' && t.dest === 'terminal' && tm.storage >= storageCap - 1) waiting++;
+  const costs = { terminal: TERMINAL.tanks[tm.tanks].opexDay + TERMINAL.jetty[tm.jetty].opexDay + sold * TERMINAL.tariffPerBbl };
+  const revenue = sold * salePrice(s);
+  const costTotal = costs.terminal;
+  return { storageCap, exportCap, sold, unloaded: 0, waiting, revenue, costs, costTotal, profit: revenue - costTotal };
+}
+
+export function applyTerminalFlows(s: GameState, tf: TerminalFlows, dt: number): void {
+  const tm = s.terminal!;
+  const vol = tf.sold * dt;
+  tm.storage = Math.max(0, tm.storage - vol);
+  s.cash += tf.profit * dt;
+  s.market.impact = Math.min(MARKET.maxImpact, s.market.impact + vol / OFFSHORE.marketDepth);
+  s.stats.oilSold += vol;
+  s.stats.revenue += tf.revenue * dt;
 }

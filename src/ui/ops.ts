@@ -111,7 +111,7 @@ export class OpsPanel {
       return [id ? help(label, id) : label, this.seaKv[key]];
     };
     this.seaRows = h('div', null,
-      h('div', { class: 'kv' }, ...seaKv('ops.rig', 'rig', 'platformRig'), ...seaKv('ops.weather', 'weather', 'storm'), ...seaKv('ops.decomCost', 'decom', 'decom')),
+      h('div', { class: 'kv' }, ...seaKv('ops.platformNet', 'net', 'platformNet'), ...seaKv('ops.rig', 'rig', 'platformRig'), ...seaKv('ops.weather', 'weather', 'storm'), ...seaKv('ops.decomCost', 'decom', 'decom')),
       h('div', { class: 'btn-row' }, this.decomBtn.el));
     this.stageBox.append(h('div', { class: 'progress' }, h('div', { class: 'lbl' }, this.stageLbl, this.stageDays), this.stageBar));
     this.fieldBody = h('div', null,
@@ -220,6 +220,11 @@ export class OpsPanel {
     toggleClass(this.seaKv.rig, 'amber', !!user);
     setText(this.seaKv.weather, storm ? t('ops.storm', { days: fmtDays(s.weather.storm) }) : s.weather.warned ? t('ops.stormSoon', { days: fmtDays(s.weather.next) }) : t('ops.calm'));
     toggleClass(this.seaKv.weather, 'bad', storm || s.weather.warned);
+    const pf = s.flows.platforms[p.id];
+    const net = pf && !p.decom && !fieldById(s, fieldId).devJob ? pf.value - pf.costTotal : null;
+    setText(this.seaKv.net, net === null ? '—' : (net >= 0 ? '+' : '') + fmtMoney(net));
+    toggleClass(this.seaKv.net, 'good', net !== null && net > 0);
+    toggleClass(this.seaKv.net, 'bad', net !== null && net < 0);
     setText(this.seaKv.decom, p.decom ? '—' : fmtMoney(decomCost(s, p)));
     this.decomBtn.el.style.display = p.decom ? 'none' : '';
     this.decomBtn.update();

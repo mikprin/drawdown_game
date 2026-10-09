@@ -166,8 +166,12 @@ export type TankerState = 'queued' | 'moored' | 'outbound' | 'port' | 'inbound';
  * Shuttle tanker on charter. Cycle: queued at anchor → moored and loading →
  * outbound to port → port (sells the cargo, or waits for the price) → inbound.
  */
+export type TankerDest = 'port' | 'terminal';
+
 export interface Tanker {
   state: TankerState;
+  /** Where the current voyage goes; 'port' state means "at the destination". Missing in old saves = port. */
+  dest?: TankerDest;
   /** Days left on the current leg (outbound / inbound). */
   daysLeft: number;
   cargo: number;
@@ -188,6 +192,14 @@ export interface Platform {
   revenueEma: number;
   /** Decommissioning under way; the platform disappears when it ends. */
   decom: { daysLeft: number; total: number } | null;
+}
+
+/** Coastal terminal at the shore base: one for the whole shelf. Levels index TERMINAL.tanks / TERMINAL.jetty. */
+export interface Terminal {
+  tanks: number;
+  jetty: number;
+  /** Oil in the terminal tanks, bbl. */
+  storage: number;
 }
 
 export interface Weather {
@@ -229,7 +241,7 @@ export interface LogEntry {
 
 export type CostId =
   | 'wellOpex' | 'liftPower' | 'facilities' | 'water' | 'transport' | 'flaring' | 'wages'
-  | 'logistics' | 'charter' | 'diesel';
+  | 'logistics' | 'charter' | 'diesel' | 'terminal';
 
 export type Bottleneck = 'none' | 'separator' | 'water' | 'storage';
 
@@ -273,6 +285,22 @@ export interface PlatformFlows {
   gasInjCap: number;
   gasFlared: number;
   revenue: number;
+  /** Oil produced valued at the realised price: what the platform earns whichever way the oil is sold. */
+  value: number;
+  costs: Partial<Record<CostId, number>>;
+  costTotal: number;
+  profit: number;
+}
+
+export interface TerminalFlows {
+  storageCap: number;
+  exportCap: number;
+  sold: number;
+  /** Oil discharged by tankers in the last step, bbl/d. */
+  unloaded: number;
+  /** Tankers alongside that cannot discharge because the tanks are full. */
+  waiting: number;
+  revenue: number;
   costs: Partial<Record<CostId, number>>;
   costTotal: number;
   profit: number;
@@ -313,6 +341,7 @@ export interface Flows {
   costTotal: number;
   profit: number;
   platforms: Record<number, PlatformFlows>;
+  terminal: TerminalFlows | null;
   total: { oil: number; water: number; liquid: number; profit: number };
 }
 
@@ -342,6 +371,7 @@ export interface GameState {
   /** Shelf exploration map, created with the shelf license. */
   shelf: Exploration | null;
   platforms: Platform[];
+  terminal: Terminal | null;
   weather: Weather;
   history: History;
   log: LogEntry[];

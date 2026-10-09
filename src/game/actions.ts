@@ -1,11 +1,11 @@
-import { DECK, ECON, EXPLORATION, FACILITIES, LIFTS, MODULES, OFFSHORE, TECHS } from './balance';
+import { DECK, ECON, EXPLORATION, FACILITIES, LIFTS, MODULES, OFFSHORE, TECHS, TERMINAL } from './balance';
 import { isDrillable, mapCfg, mapOf, undrillable } from './explore';
 import { addLog } from './log';
 import { generateShelf, makeWell, newWeather } from './newGame';
 import { newTanker } from './offshore';
 import {
-  decomCost, deckArea, deckUsed, installCost, moduleNextArea, newModules, platformById, platformLive,
-  platformOfField, rigUser, wildcatShelfCost,
+  decomCost, deckArea, deckUsed, installCost, legDays, moduleNextArea, newModules, platformById, platformLive,
+  platformOfField, rigUser, tankerDest, wildcatShelfCost,
 } from './platform';
 import {
   facilityNextCost, fieldById, fieldWells, fracCost, freeSlot, isOffshoreWell, liftCost, repairCost,
@@ -14,6 +14,8 @@ import {
 import type { MsgKey } from '../i18n/en';
 import { msg, type Msg, type MsgParams } from './msg';
 import type { FacilityId, GameState, LiftType, MapId, ModuleId, SellMode, TechId, Well } from './types';
+
+export type TerminalPart = 'tanks' | 'jetty';
 
 /**
  * Every player action validates first and only mutates when `dry` is false.
@@ -477,7 +479,8 @@ export function decommission(s: GameState, platformId: number, dry = false): Res
     for (const t of p.tankers) {
       if (t.cargo > 0 && (t.state === 'moored' || t.state === 'queued')) {
         t.state = 'outbound';
-        t.daysLeft = OFFSHORE.legBase;
+        t.dest = tankerDest(s);
+        t.daysLeft = legDays(s, p, t.dest);
       }
     }
     p.tankers = p.tankers.filter((t) => t.cargo > 0);
@@ -485,5 +488,32 @@ export function decommission(s: GameState, platformId: number, dry = false): Res
     f.developed = false;
     f.abandoned = true;
     addLog(s, msg('log.decomStart', { field: f.name }), 'bad');
+  });
+}
+
+// ---------- coastal terminal ----------
+
+export function buildTerminal(s: GameState, dry = false): Result {
+  if (!s.techs.offshore) return fail('reason.requires', { what: techName('offshore') });
+  if (s.terminal) return fail('reason.terminalBuilt');
+  return charge(s, TERMINAL.buildCost, dry, () => {
+    s.terminal = { tanks: 1, jetty: 1, storage: 0 };
+    addLog(s, msg('log.terminalBuilt'), 'good');
+  });
+}
+
+export function terminalNextCost(s: GameState, part: TerminalPart): number | null {
+  if (!s.terminal) return null;
+  return TERMINAL[part][s.terminal[part] + 1]?.cost ?? null;
+}
+
+export function upgradeTerminal(s: GameState, part: TerminalPart, dry = false): Result {
+  const tm = s.terminal;
+  if (!tm) return fail('reason.needTerminal');
+  const cost = terminalNextCost(s, part);
+  if (cost === null) return fail('reason.maxed');
+  return charge(s, cost, dry, () => {
+    tm[part]++;
+    addLog(s, msg('log.facilityUp', { facility: msg(part === 'tanks' ? 'terminal.tanks' : 'terminal.jetty') }));
   });
 }

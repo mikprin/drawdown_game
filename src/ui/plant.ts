@@ -9,6 +9,7 @@ import { ActionButton, bar, h, setBar, setText, toggleClass } from './dom';
 import type { Ctx } from './ctx';
 import { help, term, type HelpSource, type HelpView } from './help';
 import { PlatformCascade } from './platform';
+import { TerminalCard } from './terminal';
 
 interface Gauge {
   val: HTMLElement;
@@ -34,6 +35,7 @@ export class PlantPanel {
   private storageAside = h('span', { class: 'aside' });
   private onshore: HTMLElement;
   private platform: PlatformCascade;
+  private terminal: TerminalCard;
   private pnlTitle = h('span');
 
   constructor(private ctx: Ctx) {
@@ -98,6 +100,7 @@ export class PlantPanel {
     const injNote = () => t('plant.injNote', { v: ctx.s.flows.injFromProduced });
 
     this.platform = new PlatformCascade(ctx);
+    this.terminal = new TerminalCard(ctx);
     this.onshore = h('div', { class: 'section' },
         title('plant.title', 'plant'),
         node('wells', 'plant.wells', withNote(() => term('wellsNode'), liftNote), 'wells', 'good'),
@@ -124,6 +127,7 @@ export class PlantPanel {
     this.el.append(
       this.onshore,
       this.platform.el,
+      this.terminal.el,
       h('div', { class: 'section' },
         title('market.title', 'market', this.storageAside),
         this.price, help(this.priceSub, 'impact', false),
@@ -156,7 +160,9 @@ export class PlantPanel {
     const pf = plat ? fl.platforms[plat.id] : undefined;
     this.onshore.style.display = pf ? 'none' : '';
     this.platform.el.style.display = pf ? '' : 'none';
-    if (plat && pf) this.platform.update(plat, pf);
+    if (plat && pf) this.platform.update(plat, pf, fl.terminal?.waiting ?? 0);
+    this.terminal.el.style.display = pf ? '' : 'none';
+    if (pf) this.terminal.update();
     const bpd = ' ' + t('unit.bpd');
     const gas = ' ' + t('unit.gas');
     const set = (k: string, num: number, den: number, unit = '', fmt = fmtNum) => {
@@ -192,13 +198,34 @@ export class PlantPanel {
     this.whenFullRow.style.display = this.threshRow.style.display;
     this.whenFull.checked = !!m.sellWhenFull;
 
-    // P&L of the scene on screen: the onshore hub, or the selected platform (cargo sales averaged).
-    const src = pf ?? fl;
-    setText(this.pnlTitle, t(pf ? 'pnl.titlePlatform' : 'pnl.title'));
-    const rows: [string, number, string][] = [[t(pf ? 'pnl.cargoAvg' : 'pnl.sales'), src.revenue, 'good']];
-    for (const [k, v] of Object.entries(src.costs) as [CostId, number][]) if (v > 0.5) rows.push([t(`cost.${k}`), -v, '']);
+    // P&L of the scene on screen: the onshore hub, or the whole shelf (platforms plus terminal).
+    // Port cargo sales are lumpy, so they are shown as a 30-day average.
+    const rows: [string, number, string][] = [];
+    let profit: number;
+    const costs: Partial<Record<CostId, number>> = {};
+    const addCosts = (c: Partial<Record<CostId, number>>) => {
+      for (const [k, v] of Object.entries(c) as [CostId, number][]) costs[k] = (costs[k] ?? 0) + v;
+    };
+    if (pf) {
+      setText(this.pnlTitle, t('pnl.titleShelf'));
+      let cargo = 0;
+      profit = 0;
+      for (const x of Object.values(fl.platforms)) { cargo += x.revenue; profit += x.profit; addCosts(x.costs); }
+      if (cargo > 0.5 || !fl.terminal) rows.push([t('pnl.cargoAvg'), cargo, 'good']);
+      if (fl.terminal) {
+        rows.push([t('pnl.terminalSales'), fl.terminal.revenue, 'good']);
+        addCosts(fl.terminal.costs);
+        profit += fl.terminal.profit;
+      }
+    } else {
+      setText(this.pnlTitle, t('pnl.title'));
+      rows.push([t('pnl.sales'), fl.revenue, 'good']);
+      addCosts(fl.costs);
+      profit = fl.profit;
+    }
+    for (const [k, v] of Object.entries(costs) as [CostId, number][]) if (v > 0.5) rows.push([t(`cost.${k}`), -v, '']);
     const html = rows.map(([k, v, c]) => `<span class="muted">${k}</span><span class="num ${c}">${v >= 0 ? '+' : ''}${fmtMoney(v)}</span>`).join('') +
-      `<span class="total">${t('pnl.net')}</span><span class="total num ${src.profit >= 0 ? 'good' : 'bad'}">${src.profit >= 0 ? '+' : ''}${fmtMoney(src.profit)}</span>`;
+      `<span class="total">${t('pnl.net')}</span><span class="total num ${profit >= 0 ? 'good' : 'bad'}">${profit >= 0 ? '+' : ''}${fmtMoney(profit)}</span>`;
     if (this.pnl.innerHTML !== html) this.pnl.innerHTML = html;
 
     for (const row of this.techRows) {

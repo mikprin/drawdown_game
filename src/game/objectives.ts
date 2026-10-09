@@ -33,6 +33,7 @@ export const OBJECTIVES: Objective[] = [
   { id: 'shelfFind', key: 'obj.shelfFind', done: (s) => s.fields.some((f) => f.offshore) },
   { id: 'platform', key: 'obj.platform', done: (s) => onStream(s) >= 1 },
   { id: 'cargo', key: 'obj.cargo', done: (s) => s.stats.cargoes >= 1 },
+  { id: 'terminal', key: 'obj.terminal', done: (s) => !!s.terminal },
   { id: 'turbine', key: 'obj.turbine', done: (s) => s.platforms.some((p) => p.modules.turbine > 0) },
   { id: 'deck', key: 'obj.deck', done: (s) => s.platforms.some((p) => p.deck > 0) },
   { id: 'platforms2', key: 'obj.platforms2', done: (s) => onStream(s) >= 2 },

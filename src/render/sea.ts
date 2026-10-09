@@ -370,7 +370,6 @@ export class SeaView {
   }
 
   private updateTankers(s: GameState, p: Platform, bob: (k: number) => number): void {
-    const leg = legDays(s, p);
     const hose = this.overlay;
     hose.clear();
     let anchorIdx = 0;
@@ -378,6 +377,7 @@ export class SeaView {
       const v = this.tankerVis[i];
       if (!v) return;
       const show = 0.3;
+      const leg = legDays(s, p, tk.dest);
       switch (tk.state) {
         case 'moored': {
           this.shipAt(v, false, MOORED[0], MOORED[1], 1, bob(i));

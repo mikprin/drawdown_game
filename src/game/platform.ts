@@ -1,7 +1,7 @@
-import { DECK, MODULES, OFFSHORE, SHELF } from './balance';
+import { DECK, MODULES, OFFSHORE, SHELF, TERMINAL } from './balance';
 import { cellAt } from './explore';
 import { fieldById, fieldWells } from './reservoir';
-import type { Field, GameState, ModuleId, Platform, Well, WellJobKind } from './types';
+import type { Field, GameState, ModuleId, Platform, TankerDest, Well, WellJobKind } from './types';
 
 /** Platform derivations: deck space, module capacities, distances, the single rig. */
 
@@ -83,9 +83,14 @@ export function decomCost(s: GameState, p: Platform): number {
   return Math.round((OFFSHORE.decomBase + OFFSHORE.decomPerWell * fieldWells(s, f.id).length) * depthMult(s, f));
 }
 
-/** One-way sailing time between the platform and the export port. */
-export function legDays(s: GameState, p: Platform): number {
-  return OFFSHORE.legBase + OFFSHORE.legPerCell * shelfDistance(s, fieldById(s, p.fieldId));
+/** One-way sailing time between the platform and the export port, or the coastal terminal (much closer). */
+export function legDays(s: GameState, p: Platform, dest: TankerDest = 'port'): number {
+  return (dest === 'terminal' ? TERMINAL.legBase : OFFSHORE.legBase) + OFFSHORE.legPerCell * shelfDistance(s, fieldById(s, p.fieldId));
+}
+
+/** Where a tanker leaving the buoy now will go. */
+export function tankerDest(s: GameState): TankerDest {
+  return s.terminal ? 'terminal' : 'port';
 }
 
 /** The well currently using the platform rig, if any. */

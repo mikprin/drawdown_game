@@ -39,6 +39,11 @@ function migrate(data: GameState | null): GameState | null {
     data.stats.cargoes = 0;
     data.version = 3;
   }
+  if (data.version === 3) {
+    // v4 adds the coastal terminal; tankers without a destination are bound for the port.
+    data.terminal = null;
+    data.version = 4;
+  }
   return data;
 }
 

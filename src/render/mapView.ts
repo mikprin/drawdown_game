@@ -171,7 +171,7 @@ export class MapView {
       this.fogTex ??= bakeFog();
       this.staticKey = '';
     }
-    const key = getLang() + map + ex.blocks.join('') + '|' + ex.cells.map((c) => c.drilled[0] + c.fieldId).join('') +
+    const key = getLang() + map + !!s.terminal + ex.blocks.join('') + '|' + ex.cells.map((c) => c.drilled[0] + c.fieldId).join('') +
       '|' + s.fields.map((f) => `${f.id}${f.developed ? 1 : 0}${f.devJob ? 1 : 0}${f.abandoned ? 1 : 0}`).join(',');
     if (key === this.staticKey) return;
     this.staticKey = key;
@@ -233,7 +233,7 @@ export class MapView {
     const hx = ex.hubX * CELL + CELL / 2, hy = ex.hubY * CELL + CELL / 2;
     m.rect(hx - 12, hy - 12, 24, 24).fill({ color: 0x2a2620 }).stroke({ width: 2, color: 0xe8a23a });
     m.rect(hx - 6, hy - 6, 12, 12).fill({ color: 0xe8a23a });
-    label(tr(map === 'shelf' ? 'map.base' : 'map.hub'), hx, hy + 13, 0xe8a23a);
+    label(tr(map === 'shelf' ? (s.terminal ? 'map.terminal' : 'map.base') : 'map.hub'), hx, hy + 13, 0xe8a23a);
     if (map === 'shelf') {
       // Slope cells are out of a jack-up's reach: hatch them.
       for (let y = 0; y < ex.h; y++)

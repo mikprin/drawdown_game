@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buyModule, buyTech, charterTanker, decommission, developField, drillWell, drillWildcat, expandDeck, setLift,
-  setSellMode, surveyBlock,
+  buildTerminal, buyModule, buyTech, charterTanker, decommission, developField, drillWell, drillWildcat, expandDeck, setLift,
+  setSellMode, surveyBlock, upgradeTerminal,
 } from '../src/game/actions';
-import { OFFSHORE } from '../src/game/balance';
+import { OFFSHORE, TERMINAL } from '../src/game/balance';
 import { newGame, SAVE_VERSION } from '../src/game/newGame';
-import { deckArea, deckUsed, platformOfField } from '../src/game/platform';
+import { deckArea, deckUsed, legDays, platformOfField } from '../src/game/platform';
 import { fieldWells } from '../src/game/reservoir';
 import { deserialize, serialize } from '../src/game/save';
 import { step } from '../src/game/sim';
@@ -177,7 +177,76 @@ describe('shelf', () => {
   });
 });
 
+describe('coastal terminal', () => {
+  it('needs the shelf license; builds with tanks and a jetty, both upgradable', () => {
+    const s = newGame(7);
+    s.cash = 1e10;
+    expect(buildTerminal(s, true).ok).toBe(false);
+    for (const id of ['wellPad', 'exploration', 'waterflood', 'offshore'] as const) buyTech(s, id);
+    expect(upgradeTerminal(s, 'tanks', true).ok).toBe(false);
+    const cash0 = s.cash;
+    expect(buildTerminal(s).ok).toBe(true);
+    expect(cash0 - s.cash).toBe(TERMINAL.buildCost);
+    expect(s.terminal).toEqual({ tanks: 1, jetty: 1, storage: 0 });
+    expect(buildTerminal(s, true).ok).toBe(false);
+    expect(upgradeTerminal(s, 'tanks').ok).toBe(true);
+    expect(upgradeTerminal(s, 'jetty').ok).toBe(true);
+    expect(upgradeTerminal(s, 'jetty').ok).toBe(true);
+    expect(upgradeTerminal(s, 'jetty', true).ok).toBe(false);
+  });
+
+  it('tankers discharge at the terminal on a shorter voyage, and the terminal sells', () => {
+    const s = licensed();
+    const f = onStream(s);
+    const p = platformOfField(s, f.id)!;
+    buildTerminal(s);
+    expect(legDays(s, p, 'terminal')).toBeLessThan(legDays(s, p, 'port'));
+    const sold0 = s.stats.oilSold;
+    run(s, 200);
+    expect(p.tankers.some((t) => t.dest === 'terminal')).toBe(true);
+    expect(s.stats.cargoes).toBeGreaterThan(0);
+    expect(s.stats.oilSold).toBeGreaterThan(sold0);
+    expect(s.flows.terminal).not.toBeNull();
+    expect(s.terminal!.storage).toBeLessThanOrEqual(s.flows.terminal!.storageCap + 1e-6);
+  });
+
+  it('under Hold the terminal stores instead of tankers idling; a full terminal makes them wait', () => {
+    const s = licensed();
+    const f = onStream(s);
+    const p = platformOfField(s, f.id)!;
+    buildTerminal(s);
+    setSellMode(s, 'hold');
+    run(s, 150);
+    expect(s.terminal!.storage).toBeGreaterThan(0);
+    expect(s.flows.terminal!.sold).toBe(0);
+    expect(p.tankers.some((t) => t.state === 'port' && t.dest !== 'terminal')).toBe(false);
+
+    s.terminal!.storage = TERMINAL.tanks[1].value;
+    run(s, 60);
+    expect(s.flows.terminal!.waiting).toBeGreaterThan(0);
+    setSellMode(s, 'auto');
+    const sold0 = s.stats.oilSold;
+    run(s, 30);
+    expect(s.stats.oilSold - sold0).toBeGreaterThan(TERMINAL.tanks[1].value * 0.5);
+    expect(s.flows.terminal!.waiting).toBe(0);
+  });
+});
+
 describe('shelf persistence', () => {
+  it('migrates v3 saves: no terminal, tankers bound for the port', () => {
+    const s = licensed();
+    onStream(s);
+    const v3 = JSON.parse(serialize(s));
+    v3.version = 3;
+    delete v3.terminal;
+    for (const p of v3.platforms) for (const t of p.tankers) delete t.dest;
+    const t = deserialize(JSON.stringify(v3))!;
+    expect(t.version).toBe(SAVE_VERSION);
+    expect(t.terminal).toBeNull();
+    run(t, 120);
+    expect(t.stats.cargoes).toBeGreaterThan(0);
+  });
+
   it('migrates v2 saves: no shelf, no platforms', () => {
     const s = newGame(5);
     const v2 = JSON.parse(serialize(s));

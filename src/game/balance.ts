@@ -417,3 +417,26 @@ export const SHELF = {
   /** Indexed by terrain code; land codes are unused here. */
   terrainCostMult: [1, 1, 1, Infinity, Infinity, 1, 1.25, 1.6, Infinity],
 };
+
+/** Coastal terminal at the shore base: tankers discharge here instead of selling in port. */
+export const TERMINAL = {
+  buildCost: 15_000_000,
+  /** Tank farm, bbl. Level 1 comes with the build. */
+  tanks: [
+    { value: 0, cost: 0, opexDay: 0 },
+    { value: 250_000, cost: 0, opexDay: 2000 },
+    { value: 600_000, cost: 12_000_000, opexDay: 4000 },
+    { value: 1_500_000, cost: 30_000_000, opexDay: 8000 },
+  ] as FacilityLevel[],
+  /** Export jetty, bbl/d. Level 1 comes with the build. */
+  jetty: [
+    { value: 0, cost: 0, opexDay: 0 },
+    { value: 30_000, cost: 0, opexDay: 1500 },
+    { value: 80_000, cost: 10_000_000, opexDay: 3000 },
+    { value: 200_000, cost: 25_000_000, opexDay: 6000 },
+  ] as FacilityLevel[],
+  tariffPerBbl: 0.3,
+  unloadRate: 60_000,
+  /** One-way base sailing time to the terminal (the port is OFFSHORE.legBase). */
+  legBase: 1,
+};

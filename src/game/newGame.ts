@@ -3,7 +3,7 @@ import { msg } from './msg';
 import { rand, randLogNormal, randNormal, randRange, type RngHolder } from './rng';
 import type { Cell, Exploration, Field, Flows, GameState, Lead, PlatformFlows, Well } from './types';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 export const FIELD_NAMES = [
   'Ash Creek', 'Red Mesa', 'Coyote Draw', 'Iron Flats', 'Sable Ridge', 'Dry Fork',
@@ -23,7 +23,7 @@ export function emptyFlows(): Flows {
     exportCap: 0, injCap: 0, injected: 0, injFromProduced: 0, swd: 0, waterTrucked: 0,
     sold: 0, soldPipe: 0, gasSold: 0, gasFlared: 0, salePrice: 0, revenue: 0,
     costs: {}, costTotal: 0, profit: 0,
-    platforms: {}, total: { oil: 0, water: 0, liquid: 0, profit: 0 },
+    platforms: {}, terminal: null, total: { oil: 0, water: 0, liquid: 0, profit: 0 },
   };
 }
 
@@ -33,7 +33,7 @@ export function emptyPlatformFlows(): PlatformFlows {
     liftLimitedWells: 0, sepCap: 0, waterCap: 0, storageCap: 0, loaded: 0,
     injCap: 0, injected: 0, injFromProduced: 0, overboard: 0, waterTreatCap: 0,
     powerDemand: 0, gasFuel: 0, turbineCap: 0, gasInjected: 0, gasInjCap: 0, gasFlared: 0,
-    revenue: 0, costs: {}, costTotal: 0, profit: 0,
+    revenue: 0, value: 0, costs: {}, costTotal: 0, profit: 0,
   };
 }
 
@@ -260,6 +260,7 @@ export function newGame(seed = (Math.random() * 2 ** 32) >>> 0): GameState {
     exploration,
     shelf: null,
     platforms: [],
+    terminal: null,
     weather: newWeather(),
     history: { day: [], price: [], oil: [], water: [], cash: [], profit: [] },
     log: [{ day: 0, msg: msg('log.start'), kind: 'info' }],

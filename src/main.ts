@@ -198,7 +198,7 @@ async function main(): Promise<void> {
     // Tabs carry the alarms of scenes you are not looking at: red = a plant is choking wells, blue = storm at sea.
     seaTab.style.display = s.platforms.length ? '' : 'none';
     toggleClass(siteTab, 'alert', s.flows.bottleneck !== 'none');
-    toggleClass(seaTab, 'alert', Object.values(s.flows.platforms).some((pf) => pf.bottleneck !== 'none'));
+    toggleClass(seaTab, 'alert', Object.values(s.flows.platforms).some((pf) => pf.bottleneck !== 'none') || (s.flows.terminal?.waiting ?? 0) > 0);
     toggleClass(seaTab, 'storm', s.weather.storm > 0);
     hint.textContent = t(ui.view === 'site' ? 'view.hintSite' : ui.view === 'sea' ? 'view.hintSea' : 'view.hintMap');
     helpCard.update();

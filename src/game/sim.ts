@@ -5,7 +5,9 @@ import { isSelling, salePrice } from './market';
 import { msg } from './msg';
 import { FIELD_NAMES, SHELF_NAMES, emptyFlows, makeFieldFromLead, makeWell } from './newGame';
 import { checkObjectives } from './objectives';
-import { advancePlatforms, applyPlatformFlows, computePlatformFlows, newTanker, updateWeather } from './offshore';
+import {
+  advancePlatforms, applyPlatformFlows, applyTerminalFlows, computePlatformFlows, computeTerminalFlows, newTanker, updateWeather,
+} from './offshore';
 import { chokeWells, wellPotentials } from './plant';
 import { platformOfField, rigUser, stormy } from './platform';
 import {
@@ -261,6 +263,8 @@ export function computeFlows(s: GameState, dt: number): Flows {
     out.platforms[p.id] = pf;
     total.oil += pf.oil; total.water += pf.water; total.liquid += pf.liquid; total.profit += pf.profit;
   }
+  out.terminal = computeTerminalFlows(s, dt);
+  if (out.terminal) total.profit += out.terminal.profit;
   out.total = total;
   return out;
 }
@@ -281,6 +285,8 @@ function applyFlows(s: GameState, fl: Flows, dt: number): void {
   s.stats.oilSold += soldVol;
   s.stats.revenue += fl.revenue * dt;
   s.flows = fl;
+  // Terminal sells first, then tankers discharge into the room it made.
+  if (fl.terminal) applyTerminalFlows(s, fl.terminal, dt);
   for (const p of [...s.platforms]) {
     const pf = fl.platforms[p.id];
     if (pf) applyPlatformFlows(s, p, pf, dt);

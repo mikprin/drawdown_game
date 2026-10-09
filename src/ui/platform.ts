@@ -15,12 +15,13 @@ interface Gauge {
 
 const modHelp = (id: ModuleId): HelpView => ({ title: t(`mod.${id}.name`), body: t(`mod.${id}.desc`) });
 
-function tankerText(tk: Tanker): string {
+function tankerText(tk: Tanker, terminalFull: boolean): string {
+  const toTerminal = tk.dest === 'terminal';
   switch (tk.state) {
     case 'moored': return t('tanker.moored', { v: tk.cargo, cap: OFFSHORE.tankerCargo });
     case 'queued': return t('tanker.queued');
-    case 'outbound': return t('tanker.outbound', { days: fmtDays(tk.daysLeft) });
-    case 'port': return t('tanker.port');
+    case 'outbound': return t(toTerminal ? 'tanker.toTerminal' : 'tanker.outbound', { days: fmtDays(tk.daysLeft) });
+    case 'port': return t(!toTerminal ? 'tanker.port' : terminalFull ? 'tanker.terminalWait' : 'tanker.unloading');
     case 'inbound': return t('tanker.inbound', { days: fmtDays(tk.daysLeft) });
   }
 }
@@ -132,7 +133,10 @@ export class PlatformCascade {
     );
   }
 
-  update(p: Platform, pf: PlatformFlows): void {
+  private terminalWaiting = 0;
+
+  update(p: Platform, pf: PlatformFlows, terminalWaiting = 0): void {
+    this.terminalWaiting = terminalWaiting;
     const bpd = ' ' + t('unit.bpd');
     const gas = ' ' + t('unit.gas');
     const set = (k: string, num: number, den: number, unit = '', fmt = fmtNum) => {
@@ -167,9 +171,11 @@ export class PlatformCascade {
     }
     p.tankers.forEach((tk, i) => {
       const row = this.tankerRows[i];
-      setText(row, `${i + 1} · ${tankerText(tk)}`);
+      const full = (this.terminalWaiting ?? 0) > 0;
+      setText(row, `${i + 1} · ${tankerText(tk, full)}`);
       toggleClass(row, 'moored', tk.state === 'moored');
-      toggleClass(row, 'waiting', tk.state === 'port');
+      // Waiting in port for the price, or at a full terminal: either way the charter runs for nothing.
+      toggleClass(row, 'waiting', tk.state === 'port' && (tk.dest !== 'terminal' || full));
     });
 
     for (const k of ['separator', 'storage', 'water'] as const) toggleClass(this.nodes[k], 'bottleneck', pf.bottleneck === k);
